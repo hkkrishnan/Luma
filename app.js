@@ -19,6 +19,7 @@
     conflict: null,
     undo: null,
     notice: "",
+    captureImportant: false,
   };
   const icon = (name) =>
     `<svg class="lite-icon" aria-hidden="true" viewBox="0 0 24 24">${
@@ -97,15 +98,45 @@
     const days = Math.round((new Date(`${d}T12:00:00`) - new Date(`${today()}T12:00:00`)) / 86400000);
     return days <= 7 ? "urgent" : "not-urgent";
   }
+  const localDate = (date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+  const monthNames = [
+    /jan(?:uary)?/i, /feb(?:ruary)?/i, /mar(?:ch)?/i, /apr(?:il)?/i,
+    /may/i, /jun(?:e)?/i, /jul(?:y)?/i, /aug(?:ust)?/i,
+    /sept?(?:ember)?/i, /oct(?:ober)?/i, /nov(?:ember)?/i, /dec(?:ember)?/i,
+  ];
+  function priorityFor(dueDate, importance = "less-important") {
+    const urgency = urgencyFor(dueDate);
+    // The canvas deliberately has no "not important + not urgent" state.
+    return { urgency, importance: urgency === "not-urgent" ? "important" : importance };
+  }
+  function normalizeTaskPriority(task) {
+    const priority = priorityFor(task.dueDate, task.importance);
+    task.urgency = priority.urgency;
+    task.importance = priority.importance;
+    if (priority.urgency === "not-urgent" && task.canvas) {
+      task.canvas = { x: Math.min(48, task.canvas.x), y: Math.min(42, task.canvas.y) };
+    }
+    return task;
+  }
   function parseCapture(value) {
     let title = value.trim(), dueDate = null;
-    let importance = /(?:^|\s)!important\b|(?:^|\s)important\b/i.test(title) ? "important" : "less-important";
-    title = title.replace(/(?:^|\s)!important\b|(?:^|\s)important\b/ig, " ").replace(/\s+/g, " ").trim();
     const base = new Date(`${today()}T12:00:00`);
     const iso = title.match(/\b(\d{4}-\d{2}-\d{2})\b/);
+    const named = title.match(/\b(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sept?(?:ember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\s+(\d{1,2})(?:st|nd|rd|th)?(?:,?\s+(\d{4}))?\b/i);
     const relative = title.match(/\b(today|tomorrow|next\s+(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday))\b/i);
     if (iso && !Number.isNaN(new Date(`${iso[1]}T12:00:00`).getTime())) {
       dueDate = iso[1]; title = title.replace(iso[0], " ").replace(/\s+/g, " ").trim();
+    } else if (named) {
+      const month = monthNames.findIndex((pattern) => pattern.test(named[1]));
+      let year = named[3] ? Number(named[3]) : base.getFullYear();
+      let candidate = new Date(year, month, Number(named[2]), 12);
+      const valid = candidate.getMonth() === month && candidate.getDate() === Number(named[2]);
+      if (valid) {
+        // A month/day without a year means the next occurrence of that date.
+        if (!named[3] && candidate < base) candidate = new Date(++year, month, Number(named[2]), 12);
+        dueDate = localDate(candidate);
+        title = title.replace(named[0], " ").replace(/\s+/g, " ").trim();
+      }
     } else if (relative) {
       const token = relative[1].toLowerCase();
       if (token === "tomorrow") base.setDate(base.getDate() + 1);
@@ -117,20 +148,20 @@
       dueDate = base.toLocaleDateString("en-CA");
       title = title.replace(relative[0], " ").replace(/\s+/g, " ").trim();
     }
-    return { title: title || value.trim(), dueDate, importance };
+    return { title: title || value.trim(), dueDate };
   }
   function timeline() {
     const base = new Date(`${today()}T12:00:00`);
-    return [-4, -2, 0, 2].map((offset) => {
+    return [6, 4, 2, 0].map((offset) => {
       const d = new Date(base); d.setDate(base.getDate() + offset);
       return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
     });
   }
   function quadrant(t) {
-    t.urgency = urgencyFor(t.dueDate);
-    return t.importance === "important"
-      ? (t.urgency === "urgent" ? "do-first" : "schedule")
-      : (t.urgency === "urgent" ? "reconsider" : "later");
+    const priority = priorityFor(t.dueDate, t.importance);
+    return priority.importance === "important"
+      ? (priority.urgency === "urgent" ? "do-first" : "schedule")
+      : "reconsider";
   }
   function position(t, i) {
     if (t.canvas?.x != null) return t.canvas;
@@ -157,6 +188,7 @@
         w.id = state.activeId;
         w.title = active().title;
       }
+      w.tasks.forEach(normalizeTaskPriority);
       addWorkspace(w);
       state.selectedId = null;
       state.notice = w.warnings?.join(" ") || "";
@@ -225,7 +257,9 @@
     }
   }
   function update(t, changes) {
-    Object.assign(t, changes, { updatedAt: new Date().toISOString() });
+    Object.assign(t, changes);
+    normalizeTaskPriority(t);
+    Object.assign(t, { updatedAt: new Date().toISOString() });
     dirty(active());
   }
   function menu(w) {
@@ -307,13 +341,9 @@
       esc(t.dueDate || "")
     }"></label><label class="lite-editor-label">Importance<select id="task-importance" class="lite-editor-field"><option value="important" ${
       t.importance === "important" ? "selected" : ""
-    }>Important</option><option value="less-important" ${
+    }>Important</option>${urgencyFor(t.dueDate) === "urgent" ? `<option value="less-important" ${
       t.importance !== "important" ? "selected" : ""
-    }>Not important</option></select></label><label class="lite-editor-label">Urgency<select id="task-urgency" class="lite-editor-field"><option value="urgent" ${
-      t.urgency === "urgent" ? "selected" : ""
-    }>Urgent</option><option value="not-urgent" ${
-      t.urgency !== "urgent" ? "selected" : ""
-    }>Not urgent</option></select></label><label class="lite-editor-label">Notes<textarea id="task-notes" class="lite-editor-notes">${
+    }>Not important</option>` : ""}</select></label><p class="lite-editor-helper">Urgency is calculated automatically from the due date. Non-urgent tasks are always important.</p><label class="lite-editor-label">Notes<textarea id="task-notes" class="lite-editor-notes">${
       esc(t.notes || "")
     }</textarea></label><div class="lite-editor-actions"><button class="lite-editor-save" data-action="save-task">Save changes</button><button class="lite-editor-delete" data-action="delete-task">Delete task</button></div></section>`;
   }
@@ -364,7 +394,7 @@
         icon("more")
       }</button>${
         menu(w)
-      }</div></div></header><section class="lite-stage" aria-label="Priority canvas"><div class="lite-axis lite-axis-y"><span class="axis-label axis-important">Important</span><span class="axis-label axis-not-important">Not Important</span></div><div class="lite-axis lite-axis-x"><span class="axis-label">Not Urgent</span><div class="timeline">${timeline().map((label) => `<span>${label}</span>`).join("")}</div><span class="axis-label">Urgent</span></div><div class="lite-task-layer">${
+      }</div></div></header><section class="lite-stage lite-three-quadrant" aria-label="Three-area priority canvas"><div class="lite-axis lite-axis-y"><span class="axis-label axis-important">Important</span><span class="axis-label axis-not-important">Not Important<br><small>urgent only</small></span></div><div class="lite-axis lite-axis-x"><span class="axis-label">Not Urgent</span><div class="timeline">${timeline().map((label) => `<span>${label}</span>`).join("")}</div><span class="axis-label">Urgent</span></div><div class="lite-task-layer">${
         tasks(w)
       }</div>${panel(w)}</section><p class="lite-toast" role="status">${
         esc(state.notice)
@@ -408,8 +438,9 @@
           if (moved) {
             const urgency = urgencyFor(t.dueDate);
             const constrainedX = urgency === "urgent" ? Math.max(52, x) : Math.min(48, x);
+            const constrainedY = urgency === "not-urgent" ? Math.min(42, y) : y;
             node.dataset.dragged = "true";
-            update(t, { canvas: { x: Math.round(constrainedX), y: Math.round(y) }, urgency, importance: y < 43 ? "important" : "less-important" });
+            update(t, { canvas: { x: Math.round(constrainedX), y: Math.round(constrainedY) }, importance: constrainedY < 43 ? "important" : "less-important" });
           }
           document.removeEventListener("pointermove", move);
           if (moved) render();
@@ -426,6 +457,19 @@
         if (state.search) render();
       });
       input.addEventListener("keydown", (e) => {
+        if (!state.search && e.key.toLowerCase() === "i" && !input.value) {
+          e.preventDefault();
+          state.captureImportant = true;
+          input.closest(".lite-capture-wrap")?.classList.add("is-important");
+          input.placeholder = "Add an important task…";
+          return;
+        }
+        if (!state.search && e.key === "Backspace" && !input.value && state.captureImportant) {
+          state.captureImportant = false;
+          input.closest(".lite-capture-wrap")?.classList.remove("is-important");
+          input.placeholder = "Add a task…";
+          return;
+        }
         if (e.key === "Enter" && !state.search && input.value.trim()) {
           const time = new Date().toISOString();
           const captured = parseCapture(input.value);
@@ -433,8 +477,7 @@
             id: crypto.randomUUID(),
             title: captured.title,
             status: "open",
-            importance: captured.importance,
-            urgency: urgencyFor(captured.dueDate),
+            ...priorityFor(captured.dueDate, state.captureImportant ? "important" : "less-important"),
             dueDate: captured.dueDate,
             notes: "",
             createdAt: time,
@@ -445,6 +488,7 @@
           });
           dirty(active());
           state.query = "";
+          state.captureImportant = false;
           render();
           root.querySelector(".lite-capture")?.focus();
         }
@@ -510,6 +554,7 @@
         } else if (a === "toggle-search") {
           state.search = !state.search;
           state.query = "";
+          state.captureImportant = false;
           render();
           root.querySelector(".lite-capture")?.focus();
         } else if (a === "settings") {
@@ -561,7 +606,7 @@
             title: root.querySelector("#task-title").value.trim() || t.title,
             dueDate: root.querySelector("#task-due").value || null,
             importance: root.querySelector("#task-importance").value,
-            urgency: root.querySelector("#task-urgency").value,
+            urgency: urgencyFor(root.querySelector("#task-due").value || null),
             notes: root.querySelector("#task-notes").value,
           });
           state.selectedId = null;
@@ -587,6 +632,17 @@
     }
   });
   document.addEventListener("keydown", (e) => {
+    if (e.key === "/" && active() && !state.search && !e.metaKey && !e.ctrlKey && !e.altKey) {
+      const target = e.target;
+      const emptyCapture = target instanceof HTMLInputElement && target.classList.contains("lite-capture") && !target.value;
+      if (!emptyCapture && (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement || target?.isContentEditable)) return;
+      e.preventDefault();
+      state.query = "";
+      state.captureImportant = false;
+      render();
+      root.querySelector(".lite-capture")?.focus();
+      return;
+    }
     if (e.key !== "Escape") return;
     if (state.conflict) state.conflict = null;
     else if (state.settingsOpen) state.settingsOpen = false;
