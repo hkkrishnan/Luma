@@ -51,7 +51,7 @@ async function positions(page) {
   );
 }
 
-test("download then re-import keeps rendered task positions stable", async ({ page }) => {
+test("one Markdown workspace preserves profiles and aligns same-date tasks", async ({ page }) => {
   await page.goto("/");
   await page.locator("#markdown-file").setInputFiles({
     name: "personal.md",
@@ -60,6 +60,7 @@ test("download then re-import keeps rendered task positions stable", async ({ pa
   });
   await expect(page.getByText("First important task")).toBeVisible();
   const before = await positions(page);
+  expect(before.find((item) => item.id === "first").x).toBe(before.find((item) => item.id === "second").x);
 
   const downloadPromise = page.waitForEvent("download");
   await page.getByLabel("Save current Markdown workspace").click();
@@ -67,10 +68,11 @@ test("download then re-import keeps rendered task positions stable", async ({ pa
   const path = await download.path();
   expect(path).toBeTruthy();
   const saved = fs.readFileSync(path, "utf8");
-  expect(saved).not.toMatch(/id: "unplaced"[\s\S]*?canvas:/);
+  expect(saved).toContain("type: northstar-workspace");
+  expect(saved).toContain("## Profile: Personal");
+  expect(saved).toContain("## Profile: Work");
 
   await page.reload();
-  await expect(page.getByRole("heading", { name: "Open your NorthStar Markdown" })).toBeVisible();
   await page.locator("#markdown-file").setInputFiles(path);
   await expect(page.getByText("First important task")).toBeVisible();
   expect(await positions(page)).toEqual(before);

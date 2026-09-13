@@ -16,10 +16,11 @@ test("service worker has an explicit static-shell allowlist", () => {
   assert.doesNotMatch(worker, /cache\.put\(event\.request, copy\)/);
 });
 
-test("app owns session-only and external-conflict safeguards", () => {
+test("app owns local recovery and external-conflict safeguards", () => {
   const app = fs.readFileSync("app.js", "utf8");
   assert.match(app, /beforeunload/);
   assert.match(app, /createWritable/);
   assert.match(app, /changed outside NorthStar/);
-  assert.doesNotMatch(app, /localStorage|sessionStorage|indexedDB/);
+  assert.match(app, /indexedDB/);
+  assert.match(app, /Reconnect/);
 });

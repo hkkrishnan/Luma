@@ -127,7 +127,34 @@
       "---", "", `# ${w.title}`, "", "## Tasks", "", "```yaml", tasks || "[]", "```", "", "## Notes", "", "```text", w.notes, "```", "",
     ].join("\n");
   }
-  const api = { ACTIVE_STATUSES, CLOSED_STATUSES, isIsoDate, urgencyFor, parseMarkdown, serializeMarkdown, normalizeWorkspace, normalizeTask, localDate };
+  const subSection = (name, text) => new RegExp(`^###\\s+${name}\\s*\\n\\s*(?:\`\`\`(?:yaml|text)?\\n)?([\\s\\S]*?)(?:\\n\`\`\`|(?=^###\\s)|(?![\\s\\S]))`, "im").exec(text)?.[1]?.replace(/\n$/, "") ?? "";
+  function parseWorkspaceMarkdown(text, fileName = "northstar.md") {
+    const meta = frontmatter(text), warnings = [];
+    if (meta.type !== "northstar-workspace") {
+      const legacy = parseMarkdown(text, fileName);
+      warnings.push("Imported a legacy single-profile file. Save it to migrate to one NorthStar workspace file.");
+      return { profiles: [legacy], warnings, legacy: true };
+    }
+    const profiles = [];
+    const matcher = /^##\s+Profile:\s*(Personal|Work)\s*\n([\s\S]*?)(?=^##\s+Profile:|(?![\s\S]))/gim;
+    for (const match of text.matchAll(matcher)) {
+      const title = match[1][0].toUpperCase() + match[1].slice(1).toLowerCase();
+      const profileWarnings = [];
+      profiles.push(normalizeWorkspace({ id: title, title, tasks: parseTasks(subSection("Tasks", match[2])), notes: subSection("Notes", match[2]), fileName }, profileWarnings));
+      warnings.push(...profileWarnings);
+    }
+    if (!profiles.length) warnings.push("No Personal or Work profiles were found in this workspace file.");
+    return { profiles, warnings, legacy: false };
+  }
+  function serializeWorkspaceMarkdown(workspaces) {
+    const profiles = workspaces.map((workspace) => normalizeWorkspace(workspace));
+    const contents = profiles.map((profile) => {
+      const source = serializeMarkdown(profile);
+      return `## Profile: ${profile.title}\n\n### Tasks\n\n\`\`\`yaml\n${section("Tasks", source) || "[]"}\n\`\`\`\n\n### Notes\n\n\`\`\`text\n${section("Notes", source)}\n\`\`\``;
+    });
+    return ["---", "type: northstar-workspace", "version: 1", "title: NorthStar", "---", "", "# NorthStar", "", ...contents, ""].join("\n");
+  }
+  const api = { ACTIVE_STATUSES, CLOSED_STATUSES, isIsoDate, urgencyFor, parseMarkdown, serializeMarkdown, parseWorkspaceMarkdown, serializeWorkspaceMarkdown, normalizeWorkspace, normalizeTask, localDate };
   global.NorthstarMarkdown = api;
   if (typeof module !== "undefined") module.exports = api;
 })(typeof window !== "undefined" ? window : globalThis);

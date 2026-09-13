@@ -1,5 +1,5 @@
 const assert = require("node:assert/strict");
-const { parseMarkdown, serializeMarkdown } = require(
+const { parseMarkdown, serializeMarkdown, parseWorkspaceMarkdown, serializeWorkspaceMarkdown } = require(
   "../northstar-markdown.js",
 );
 const canonical =
@@ -77,3 +77,9 @@ const noCanvas = parseMarkdown(serializeMarkdown({
   }],
 }), "personal.md");
 assert.equal(noCanvas.tasks[0].canvas, null);
+
+const combined = serializeWorkspaceMarkdown([personal, work]);
+const combinedRoundTrip = parseWorkspaceMarkdown(combined, "northstar.md");
+assert.equal(combinedRoundTrip.profiles.length, 2);
+assert.equal(combinedRoundTrip.profiles.find((profile) => profile.id === "personal").tasks[0].title, 'Call: "Maya" #1');
+assert.equal(combinedRoundTrip.profiles.find((profile) => profile.id === "work").notes, "work only");

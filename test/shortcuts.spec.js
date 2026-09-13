@@ -36,4 +36,8 @@ test("slash capture assigns importance and derives urgency from the due date", a
   await page.getByText("Plan release").click();
   await expect(page.locator("#task-importance")).toHaveValue("important");
   await expect(page.locator("#task-importance option[value='less-important']")).toHaveCount(0);
+
+  await page.waitForTimeout(250);
+  await page.reload();
+  await expect(page.getByText("Plan release")).toBeVisible();
 });

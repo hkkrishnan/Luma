@@ -4,7 +4,7 @@
   if ("serviceWorker" in navigator) {
     window.addEventListener("load", () => navigator.serviceWorker.register("./sw.js").catch(() => {}));
   }
-  const { parseMarkdown, serializeMarkdown, normalizeWorkspace } =
+  const { parseWorkspaceMarkdown, serializeWorkspaceMarkdown, normalizeWorkspace } =
     window.NorthstarMarkdown;
   const root = document.getElementById("root");
   const state = {
@@ -20,6 +20,8 @@
     undo: null,
     notice: "",
     captureImportant: false,
+    file: { handle: null, fileName: "northstar.md", revision: null },
+    persistTimer: null,
   };
   const icon = (name) =>
     `<svg class="lite-icon" aria-hidden="true" viewBox="0 0 24 24">${
@@ -52,7 +54,8 @@
     );
   const today = () => new Date().toLocaleDateString("en-CA");
   const active = () => state.workspaces.get(state.activeId);
-  const dirty = (w) => w.dirty = true;
+  const profiles = () => [...state.workspaces.values()];
+  const dirty = (w) => { w.dirty = true; queueLocalSave(); };
   const hash = async (text) => {
     if (crypto.subtle) {
       const bytes = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
@@ -60,13 +63,77 @@
     }
     return `${text.length}:${text.slice(0, 64)}:${text.slice(-64)}`;
   };
+  const localDb = (() => {
+    const open = () => new Promise((resolve, reject) => {
+      if (!window.indexedDB) return reject(new Error("IndexedDB is unavailable."));
+      const request = indexedDB.open("northstar-lite", 1);
+      request.onupgradeneeded = () => request.result.createObjectStore("workspace");
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    const read = async () => {
+      const db = await open();
+      return new Promise((resolve, reject) => {
+        const request = db.transaction("workspace").objectStore("workspace").get("current");
+        request.onsuccess = () => resolve(request.result || null);
+        request.onerror = () => reject(request.error);
+      });
+    };
+    const write = async (value) => {
+      const db = await open();
+      return new Promise((resolve, reject) => {
+        const request = db.transaction("workspace", "readwrite").objectStore("workspace").put(value, "current");
+        request.onsuccess = () => resolve();
+        request.onerror = () => reject(request.error);
+      });
+    };
+    return { read, write };
+  })();
+  function queueLocalSave() {
+    clearTimeout(state.persistTimer);
+    state.persistTimer = setTimeout(() => void persistLocal(), 150);
+  }
+  async function persistLocal() {
+    if (!profiles().length) return;
+    const snapshot = serializeWorkspaceMarkdown(profiles());
+    const previous = await localDb.read().catch(() => null);
+    const snapshots = [{ createdAt: new Date().toISOString(), markdown: snapshot }, ...(previous?.snapshots || [])]
+      .filter((entry, index, entries) => index === 0 || entry.markdown !== entries[index - 1].markdown)
+      .slice(0, 5);
+    const record = {
+      profiles: profiles().map((profile) => ({ ...profile, handle: null, revision: null })),
+      activeId: state.activeId,
+      file: state.file,
+      savedAt: new Date().toISOString(),
+      snapshots,
+    };
+    try {
+      await localDb.write(record);
+    } catch {
+      // Some browsers cannot persist file handles. Retain the safe task copy anyway.
+      await localDb.write({ ...record, file: { ...state.file, handle: null } }).catch(() => {});
+    }
+  }
+  async function restoreLocal() {
+    try {
+      const record = await localDb.read();
+      if (!record?.profiles?.length) return false;
+      loadProfiles(record.profiles.map((profile) => normalizeWorkspace(profile)), record.file, record.activeId);
+      state.notice = state.file.handle
+        ? `Restored your browser copy. Reconnect ${state.file.fileName} to check the latest Markdown.`
+        : "Restored your browser copy. Import or reconnect Markdown when ready.";
+      return true;
+    } catch {
+      return false;
+    }
+  }
   const blank = (id) =>
     normalizeWorkspace({
       id,
       title: id === "work" ? "Work" : "Personal",
       tasks: [],
       notes: "",
-      fileName: `${id}.md`,
+      fileName: "northstar.md",
     });
   function addWorkspace(w) {
     const id = /work/i.test(`${w.id} ${w.title}`) ? "work" : "personal";
@@ -80,6 +147,18 @@
       state.workspaces.set("work", blank("work"));
     }
     state.activeId = id;
+  }
+  function loadProfiles(items, file = state.file, activeId = "personal") {
+    state.workspaces.clear();
+    items.forEach((item) => {
+      item.tasks.forEach(normalizeTaskPriority);
+      addWorkspace(item);
+    });
+    if (!state.workspaces.has("personal")) state.workspaces.set("personal", blank("personal"));
+    if (!state.workspaces.has("work")) state.workspaces.set("work", blank("work"));
+    state.file = { handle: file?.handle || null, fileName: file?.fileName || "northstar.md", revision: file?.revision || null };
+    profiles().forEach((profile) => { profile.fileName = state.file.fileName; profile.handle = state.file.handle; profile.revision = state.file.revision; });
+    state.activeId = state.workspaces.has(activeId) ? activeId : "personal";
   }
   function due(d) {
     if (!d) return "";
@@ -113,9 +192,8 @@
     const priority = priorityFor(task.dueDate, task.importance);
     task.urgency = priority.urgency;
     task.importance = priority.importance;
-    if (priority.urgency === "not-urgent" && task.canvas) {
-      task.canvas = { x: Math.min(48, task.canvas.x), y: Math.min(42, task.canvas.y) };
-    }
+    // Legacy free-form positions are intentionally discarded: the date determines X.
+    task.canvas = null;
     return task;
   }
   function parseCapture(value) {
@@ -152,7 +230,7 @@
   }
   function timeline() {
     const base = new Date(`${today()}T12:00:00`);
-    return [6, 4, 2, 0].map((offset) => {
+    return [7, 6, 5, 4, 3, 2, 1, 0].map((offset) => {
       const d = new Date(base); d.setDate(base.getDate() + offset);
       return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
     });
@@ -164,15 +242,11 @@
       : "reconsider";
   }
   function position(t, i) {
-    if (t.canvas?.x != null) return t.canvas;
-    const p = {
-        schedule: [18, 22],
-        "do-first": [67, 22],
-        reconsider: [67, 66],
-        later: [18, 66],
-      }[quadrant(t)],
-      j = (i % 4) * 6;
-    return { x: p[0] + j, y: p[1] + j };
+    if (!t.dueDate) return { x: 18, y: 22 + (i % 4) * 7 };
+    const days = Math.round((new Date(`${t.dueDate}T12:00:00`) - new Date(`${today()}T12:00:00`)) / 86400000);
+    // The daily ticks span the Urgent half of the axis: day 7 at 52%, today at 88%.
+    const x = days > 7 ? 18 : Math.max(52, Math.min(88, 88 - Math.max(0, days) * (36 / 7)));
+    return { x, y: t.importance === "important" ? 22 : 66 };
   }
   function notice(m) {
     state.notice = m;
@@ -180,18 +254,12 @@
   }
   async function importFile(file, handle = null, replace = false) {
     try {
-      const w = parseMarkdown(await file.text(), file.name);
-      w.handle = handle;
-      w.fileName = file.name;
-      w.revision = await hash(await file.text());
-      if (replace && state.activeId) {
-        w.id = state.activeId;
-        w.title = active().title;
-      }
-      w.tasks.forEach(normalizeTaskPriority);
-      addWorkspace(w);
+      const text = await file.text();
+      const parsed = parseWorkspaceMarkdown(text, file.name);
+      loadProfiles(parsed.profiles, { handle, fileName: file.name || "northstar.md", revision: await hash(text) }, state.activeId || "personal");
       state.selectedId = null;
-      state.notice = w.warnings?.join(" ") || "";
+      state.notice = parsed.warnings.join(" ") || "Opened one NorthStar workspace file.";
+      queueLocalSave();
       render();
     } catch (e) {
       notice(`Could not read Markdown: ${e.message}`);
@@ -220,37 +288,49 @@
     input.value = "";
     input.click();
   }
-  async function save(download = false) {
-    const w = active(), text = serializeMarkdown(w);
+  async function reconnect() {
+    if (!state.file.handle) return picker(true);
     try {
-      if (w.handle && !download) {
-        const before = await w.handle.getFile();
+      const permission = await state.file.handle.requestPermission({ mode: "readwrite" });
+      if (permission !== "granted") return notice("File permission was not granted. Your browser copy is still safe.");
+      const file = await state.file.handle.getFile();
+      await importFile(file, state.file.handle);
+    } catch (e) {
+      notice(`Could not reconnect Markdown: ${e.message}`);
+    }
+  }
+  async function save(download = false) {
+    const text = serializeWorkspaceMarkdown(profiles());
+    try {
+      if (state.file.handle && !download) {
+        const before = await state.file.handle.getFile();
         const external = await before.text();
-        if (w.revision && await hash(external) !== w.revision) {
-          state.conflict = { text: external, name: before.name || w.fileName };
+        if (state.file.revision && await hash(external) !== state.file.revision) {
+          state.conflict = { text: external, name: before.name || state.file.fileName };
           state.notice = "The Markdown file changed outside NorthStar. Choose Reload file or Download current changes.";
           render();
           return;
         }
-        const out = await w.handle.createWritable();
+        const out = await state.file.handle.createWritable();
         await out.write(text);
         await out.close();
-        const verified = await (await w.handle.getFile()).text();
+        const verified = await (await state.file.handle.getFile()).text();
         if (verified !== text) throw new Error("The browser could not verify the saved file.");
-        w.revision = await hash(verified);
-        w.dirty = false;
+        state.file.revision = await hash(verified);
+        profiles().forEach((profile) => { profile.revision = state.file.revision; profile.dirty = false; });
         state.notice = "Saved to the opened Markdown file.";
       } else {
         const a = document.createElement("a");
         a.href = URL.createObjectURL(
           new Blob([text], { type: "text/markdown;charset=utf-8" }),
         );
-        a.download = w.fileName || `${w.id}.md`;
+        a.download = state.file.fileName || "northstar.md";
         a.click();
         setTimeout(() => URL.revokeObjectURL(a.href), 500);
-        w.dirty = false;
+        profiles().forEach((profile) => profile.dirty = false);
         state.notice = "Downloaded an updated Markdown copy.";
       }
+      queueLocalSave();
       render();
     } catch (e) {
       notice(`Could not save Markdown: ${e.message}`);
@@ -266,13 +346,7 @@
     const undo = state.undo?.workspaceId === w.id;
     return `<div class="lite-menu" ${
       state.menuOpen ? "" : "hidden"
-    } role="menu"><div class="lite-menu-section">File</div><button class="lite-menu-item" data-action="download">${
-      icon("download")
-    }Download copy</button><button class="lite-menu-item" data-action="import">${
-      icon("upload")
-    }Import Markdown</button><button class="lite-menu-item" data-action="replace">${
-      icon("upload")
-    }Replace ${w.title}</button><button class="lite-menu-item" data-action="history">${
+    } role="menu"><div class="lite-menu-section">Workspace</div><button class="lite-menu-item" data-action="history">${
       icon("restore")
     }History</button><div class="lite-menu-separator"></div>${
       undo
@@ -295,18 +369,8 @@
       const saved = position(t, i), key = `${Math.round(saved.x)}:${Math.round(saved.y)}`;
       const collisions = occupied.get(key) || 0;
       occupied.set(key, collisions + 1);
-      // Keep intentional positions, but fan out coincident imports so every task remains selectable.
-      let p = collisions ? {
-        x: Math.min(91, Math.max(9, saved.x + (collisions % 3) * 7)),
-        y: Math.min(88, Math.max(10, saved.y + Math.ceil(collisions / 3) * 8)),
-      } : saved;
-      // Labels can be much wider than their dot. Move a colliding row vertically
-      // before moving it sideways, so imported task names never cover each other.
-      let attempts = 0;
-      while (placed.some((other) => Math.abs(other.x - p.x) < 29 && Math.abs(other.y - p.y) < 10) && attempts < 8) {
-        p = p.y <= 77 ? { ...p, y: p.y + 12 } : { x: Math.min(91, p.x + 30), y: Math.max(10, saved.y - 12) };
-        attempts += 1;
-      }
+      // Same-date cards stack inside their importance band; their timeline position never moves.
+      let p = { x: saved.x, y: Math.min(t.importance === "important" ? 39 : 84, saved.y + collisions * 8) };
       placed.push(p);
       const d = due(t.dueDate);
       return `<article class="lite-task task-${quadrant(t)}" data-task="${
@@ -388,7 +452,7 @@
         state.search ? "Exit search" : "Search tasks"
       }">${
         icon(state.search ? "close" : "search")
-      }</button></div><button class="lite-save" data-action="save" aria-label="Save current Markdown workspace">${
+      }</button></div>${state.file.handle ? `<button class="lite-reconnect" data-action="reconnect" title="Reconnect ${esc(state.file.fileName)}">Reconnect</button>` : ""}<button class="lite-save" data-action="save" aria-label="Save current Markdown workspace">${
         icon("cloud")
       }</button><div class="menu-anchor"><button class="lite-menu-button" data-action="toggle-menu" aria-label="Open workspace menu" aria-expanded="${state.menuOpen}">${
         icon("more")
@@ -402,7 +466,7 @@
         state.settingsOpen ? "" : "hidden"
       }><section class="lite-settings-card" role="dialog" aria-modal="true"><div class="lite-settings-header"><h2>Settings</h2><button data-action="close-settings" aria-label="Close settings">${
         icon("close")
-      }</button></div><p>NorthStar Lite keeps tasks and notes only in memory for this page session. Save to your Markdown file or download a copy when ready.</p><button class="lite-reset-layout" data-action="reset-layout">Reset current layout</button></section></div></main>`;
+      }</button></div><p>NorthStar Lite saves a private recovery copy in this browser. Save to Markdown when you want to update your file.</p><button class="lite-reset-layout" data-action="reset-layout">Reset current layout</button></section></div></main>`;
     bind();
   }
   function drag(node, t) {
@@ -434,13 +498,12 @@
             y = Math.min(
               88,
               Math.max(10, (ev.clientY - r.top) / r.height * 100),
-            );
+          );
           if (moved) {
             const urgency = urgencyFor(t.dueDate);
-            const constrainedX = urgency === "urgent" ? Math.max(52, x) : Math.min(48, x);
             const constrainedY = urgency === "not-urgent" ? Math.min(42, y) : y;
             node.dataset.dragged = "true";
-            update(t, { canvas: { x: Math.round(constrainedX), y: Math.round(constrainedY) }, importance: constrainedY < 43 ? "important" : "less-important" });
+            update(t, { canvas: null, importance: constrainedY < 43 ? "important" : "less-important" });
           }
           document.removeEventListener("pointermove", move);
           if (moved) render();
@@ -504,6 +567,7 @@
         state.selectedId = null;
         state.menuOpen = false;
         state.notice = "";
+        queueLocalSave();
         render();
       }
     );
@@ -536,6 +600,7 @@
       b.onclick = () => {
         const a = b.dataset.action;
         if (a === "direct-open") picker(true);
+        else if (a === "reconnect") void reconnect();
         else if (a === "new-workspace") {
           const workspace = blank("personal");
           workspace.dirty = true;
@@ -573,7 +638,7 @@
         } else if (a === "conflict-reload") {
           const conflict = state.conflict;
           state.conflict = null;
-          importFile(new File([conflict.text], conflict.name, { type: "text/markdown" }), active().handle, true);
+          importFile(new File([conflict.text], conflict.name, { type: "text/markdown" }), state.file.handle);
         } else if (a === "reset-layout") {
           active().tasks.forEach((t) => update(t, { canvas: null }));
           dirty(active());
@@ -661,5 +726,5 @@
       event.returnValue = "";
     }
   });
-  render();
+  void restoreLocal().then(() => render());
 })();
