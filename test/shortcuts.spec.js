@@ -20,7 +20,7 @@ test("slash capture assigns importance and derives urgency from the due date", a
   await expect(page.locator(".lite-task", { hasText: "Send proposal" })).toHaveClass(/task-do-first/);
 
   await page.getByText("Send proposal").click();
-  await expect(page.getByText("Urgency is calculated automatically from the due date.")).toBeVisible();
+  await expect(page.getByText("Urgency is calculated automatically from the due date.")).toHaveCount(0);
   await expect(page.locator("#task-urgency")).toHaveCount(0);
 
   const later = new Date();
@@ -32,6 +32,7 @@ test("slash capture assigns importance and derives urgency from the due date", a
   const laterTask = page.locator(".lite-task", { hasText: "Plan release" });
   await expect(laterTask).toHaveClass(/task-schedule/);
   await expect(laterTask).toContainText(namedDate);
+  await expect(page.locator(".timeline span", { hasText: namedDate })).toHaveCount(1);
 
   await page.getByText("Plan release").click();
   await expect(page.locator("#task-importance")).toHaveValue("important");

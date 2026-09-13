@@ -59,8 +59,15 @@ test("one Markdown workspace preserves profiles and aligns same-date tasks", asy
     buffer: Buffer.from(profile),
   });
   await expect(page.getByText("First important task")).toBeVisible();
+  await page.getByRole("button", { name: "Open workspace menu" }).click();
+  await expect(page.getByRole("button", { name: "Open / replace Markdown workspace" })).toBeVisible();
   const before = await positions(page);
   expect(before.find((item) => item.id === "first").x).toBe(before.find((item) => item.id === "second").x);
+  expect(before.find((item) => item.id === "first").y).not.toBe(before.find((item) => item.id === "second").y);
+  const tickPositions = await page.locator(".timeline span").evaluateAll((nodes) =>
+    nodes.map((node) => Number.parseFloat(node.style.getPropertyValue("--tick-x"))),
+  );
+  expect(tickPositions.every((x) => x <= 42 || x >= 58)).toBe(true);
 
   const downloadPromise = page.waitForEvent("download");
   await page.getByLabel("Save current Markdown workspace").click();

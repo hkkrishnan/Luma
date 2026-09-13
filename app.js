@@ -228,11 +228,55 @@
     }
     return { title: title || value.trim(), dueDate };
   }
-  function timeline() {
+  function dayOffset(date) {
+    if (!date) return null;
+    return Math.round(
+      (new Date(`${date}T12:00:00`) - new Date(`${today()}T12:00:00`)) / 86400000,
+    );
+  }
+  function timeline(w = active()) {
+    const activeDays = (w?.tasks || [])
+      .filter((t) => !["completed", "cancelled", "deleted"].includes(t.status))
+      .map((t) => dayOffset(t.dueDate))
+      .filter((days) => days !== null && days >= 0);
+    const futureDays = activeDays.filter((days) => days > 7);
+    const taskDays = new Set(activeDays);
+    // Show reference dates on the non-urgent side, plus every active due date.
+    const farthest = Math.max(28, ...futureDays);
+    const days = [...new Set([0, 1, 2, 3, 4, 5, 6, 7, 8, 14, 21, 28, ...futureDays])]
+      .filter((offset) => offset <= farthest)
+      .sort((a, b) => b - a);
     const base = new Date(`${today()}T12:00:00`);
-    return [7, 6, 5, 4, 3, 2, 1, 0].map((offset) => {
-      const d = new Date(base); d.setDate(base.getDate() + offset);
-      return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+    const ticks = days.map((offset) => {
+      const d = new Date(base);
+      d.setDate(base.getDate() + offset);
+      const x = offset <= 7
+        ? 88 - offset * (30 / 7)
+        : 42 - ((offset - 7) / (farthest - 7)) * 30;
+      return {
+        offset,
+        label: d.toLocaleDateString(undefined, { month: "short", day: "numeric" }),
+        x,
+        isTaskDate: taskDays.has(offset),
+      };
+    });
+    // Keep dots for every date, but only render labels that have enough room.
+    const visible = [];
+    return ticks.sort((a, b) => a.x - b.x).map((tick) => {
+      const previous = visible[visible.length - 1];
+      if (!previous || tick.x - previous.x >= 7) {
+        const labeled = { ...tick, showLabel: true };
+        visible.push(labeled);
+        return labeled;
+      }
+      if (tick.isTaskDate && !previous.isTaskDate) {
+        previous.showLabel = false;
+        visible.pop();
+        const labeled = { ...tick, showLabel: true };
+        visible.push(labeled);
+        return labeled;
+      }
+      return { ...tick, showLabel: false };
     });
   }
   function quadrant(t) {
@@ -241,18 +285,23 @@
       ? (priority.urgency === "urgent" ? "do-first" : "schedule")
       : "reconsider";
   }
-  function position(t, i) {
+  function position(t, i, w = active()) {
     if (!t.dueDate) return { x: 18, y: 22 + (i % 4) * 7 };
-    const days = Math.round((new Date(`${t.dueDate}T12:00:00`) - new Date(`${today()}T12:00:00`)) / 86400000);
-    // The daily ticks span the Urgent half of the axis: day 7 at 52%, today at 88%.
-    const x = days > 7 ? 18 : Math.max(52, Math.min(88, 88 - Math.max(0, days) * (36 / 7)));
+    const days = dayOffset(t.dueDate);
+    const farthest = Math.max(
+      28,
+      ...(w?.tasks || []).map((task) => dayOffset(task.dueDate)).filter((offset) => offset !== null && offset > 7),
+    );
+    const x = days > 7
+      ? 42 - ((days - 7) / (farthest - 7)) * 30
+      : Math.max(58, Math.min(88, 88 - Math.max(0, days) * (30 / 7)));
     return { x, y: t.importance === "important" ? 22 : 66 };
   }
   function notice(m) {
     state.notice = m;
     render();
   }
-  async function importFile(file, handle = null, replace = false) {
+  async function importFile(file, handle = null) {
     try {
       const text = await file.text();
       const parsed = parseWorkspaceMarkdown(text, file.name);
@@ -265,7 +314,11 @@
       notice(`Could not read Markdown: ${e.message}`);
     }
   }
-  function picker(direct = false, replace = false) {
+  function picker(direct = false) {
+    if (profiles().some((profile) => profile.dirty) &&
+      !window.confirm("Open another Markdown workspace? Unsaved browser changes will be replaced. Save first if you want to keep them.")) {
+      return;
+    }
     if (direct && window.showOpenFilePicker) {
       window.showOpenFilePicker({
         types: [{
@@ -275,7 +328,7 @@
             "text/plain": [".txt"],
           },
         }],
-      }).then(([h]) => h.getFile().then((f) => importFile(f, h, replace)))
+      }).then(([h]) => h.getFile().then((f) => importFile(f, h)))
         .catch((e) => {
           if (e.name !== "AbortError") {
             notice(`Could not open Markdown: ${e.message}`);
@@ -284,7 +337,6 @@
       return;
     }
     const input = document.getElementById("markdown-file");
-    input.dataset.replace = replace ? "true" : "false";
     input.value = "";
     input.click();
   }
@@ -346,7 +398,9 @@
     const undo = state.undo?.workspaceId === w.id;
     return `<div class="lite-menu" ${
       state.menuOpen ? "" : "hidden"
-    } role="menu"><div class="lite-menu-section">Workspace</div><button class="lite-menu-item" data-action="history">${
+    } role="menu"><div class="lite-menu-section">Workspace</div><button class="lite-menu-item" data-action="open-workspace">${
+      icon("upload")
+    }Open / replace Markdown workspace</button><button class="lite-menu-item" data-action="history">${
       icon("restore")
     }History</button><div class="lite-menu-separator"></div>${
       undo
@@ -360,18 +414,25 @@
   }
   function tasks(w) {
     const q = state.query.trim().toLowerCase();
-    const occupied = new Map();
-    const placed = [];
+    const lanes = {
+      important: [12, 20, 28, 36],
+      "less-important": [60, 68, 76, 84],
+    };
+    const occupied = { important: [[], [], [], []], "less-important": [[], [], [], []] };
+    const width = Math.min(28, Math.max(18, 250 / Math.max(root.clientWidth, 1) * 100));
     return w.tasks.filter((t) =>
       !["completed", "cancelled", "deleted"].includes(t.status) &&
       (!state.search || `${t.title} ${t.notes} ${(t.tags || []).join(" ")} ${t.project || ""}`.toLowerCase().includes(q))
     ).map((t, i) => {
-      const saved = position(t, i), key = `${Math.round(saved.x)}:${Math.round(saved.y)}`;
-      const collisions = occupied.get(key) || 0;
-      occupied.set(key, collisions + 1);
-      // Same-date cards stack inside their importance band; their timeline position never moves.
-      let p = { x: saved.x, y: Math.min(t.importance === "important" ? 39 : 84, saved.y + collisions * 8) };
-      placed.push(p);
+      const saved = position(t, i, w);
+      const band = t.importance === "important" ? "important" : "less-important";
+      const lane = occupied[band].findIndex((items) =>
+        !items.some((item) => saved.x < item.x + item.width + 1 && item.x < saved.x + width + 1),
+      );
+      const laneIndex = lane === -1 ? occupied[band].length - 1 : lane;
+      // Cards may move vertically into a free lane, never away from their date.
+      occupied[band][laneIndex].push({ x: saved.x, width });
+      const p = { x: saved.x, y: lanes[band][laneIndex] };
       const d = due(t.dueDate);
       return `<article class="lite-task task-${quadrant(t)}" data-task="${
         esc(t.id)
@@ -381,7 +442,7 @@
         esc(t.title)
       } complete"></button><button class="lite-task-label" data-select="${
         esc(t.id)
-      }"><span class="lite-task-title">${esc(t.title)}</span>${
+      }"><span class="lite-task-title" title="${esc(t.title)}">${esc(t.title)}</span>${
         d
           ? `<span class="lite-task-due ${
             d === "Today" || d === "Overdue" ? "is-today" : ""
@@ -407,7 +468,7 @@
       t.importance === "important" ? "selected" : ""
     }>Important</option>${urgencyFor(t.dueDate) === "urgent" ? `<option value="less-important" ${
       t.importance !== "important" ? "selected" : ""
-    }>Not important</option>` : ""}</select></label><p class="lite-editor-helper">Urgency is calculated automatically from the due date. Non-urgent tasks are always important.</p><label class="lite-editor-label">Notes<textarea id="task-notes" class="lite-editor-notes">${
+    }>Not important</option>` : ""}</select></label><label class="lite-editor-label">Notes<textarea id="task-notes" class="lite-editor-notes">${
       esc(t.notes || "")
     }</textarea></label><div class="lite-editor-actions"><button class="lite-editor-save" data-action="save-task">Save changes</button><button class="lite-editor-delete" data-action="delete-task">Delete task</button></div></section>`;
   }
@@ -458,7 +519,7 @@
         icon("more")
       }</button>${
         menu(w)
-      }</div></div></header><section class="lite-stage lite-three-quadrant" aria-label="Three-area priority canvas"><div class="lite-axis lite-axis-y"><span class="axis-label axis-important">Important</span><span class="axis-label axis-not-important">Not Important<br><small>urgent only</small></span></div><div class="lite-axis lite-axis-x"><span class="axis-label">Not Urgent</span><div class="timeline">${timeline().map((label) => `<span>${label}</span>`).join("")}</div><span class="axis-label">Urgent</span></div><div class="lite-task-layer">${
+      }</div></div></header><section class="lite-stage lite-three-quadrant" aria-label="Three-area priority canvas"><div class="lite-axis lite-axis-y"><span class="axis-label axis-important">Important</span><span class="axis-label axis-not-important">Not Important<br><small>urgent only</small></span></div><div class="lite-axis lite-axis-x"><span class="axis-label">Not Urgent</span><div class="timeline">${timeline(w).map((tick) => `<span class="${tick.showLabel ? "" : "is-label-hidden"}" style="--tick-x:${tick.x}%" title="${esc(tick.label)}">${esc(tick.label)}</span>`).join("")}</div><span class="axis-label">Urgent</span></div><div class="lite-task-layer">${
         tasks(w)
       }</div>${panel(w)}</section><p class="lite-toast" role="status">${
         esc(state.notice)
@@ -609,9 +670,7 @@
           render();
         }
         else if (a === "save") save();
-        else if (a === "download") { state.menuOpen = false; save(true); }
-        else if (a === "import") { state.menuOpen = false; picker(); }
-        else if (a === "replace") { state.menuOpen = false; picker(false, true); }
+        else if (a === "open-workspace") { state.menuOpen = false; picker(Boolean(window.showOpenFilePicker)); }
         else if (a === "history") { state.historyOpen = true; state.menuOpen = false; render(); }
         else if (a === "toggle-menu") {
           state.menuOpen = !state.menuOpen;
@@ -688,7 +747,7 @@
   }
   document.getElementById("markdown-file").addEventListener("change", (e) => {
     const f = e.target.files?.[0];
-    if (f) importFile(f, null, e.target.dataset.replace === "true");
+    if (f) importFile(f);
   });
   document.addEventListener("click", (e) => {
     if (state.menuOpen && !e.target.closest(".menu-anchor")) {
