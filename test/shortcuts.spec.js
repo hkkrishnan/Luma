@@ -47,4 +47,10 @@ test("slash capture assigns importance and derives urgency from the due date", a
   await page.waitForTimeout(250);
   await page.reload();
   await expect(page.getByText("Plan release")).toBeVisible();
+  await page.getByRole("button", { name: "Open workspace menu" }).click();
+  const clear = page.getByRole("button", { name: "Clear browser workspace" });
+  await expect(clear).toBeVisible();
+  page.once("dialog", (dialog) => dialog.accept());
+  await clear.click();
+  await expect(page.getByRole("button", { name: "Start a new Markdown file" })).toBeVisible();
 });

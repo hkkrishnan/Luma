@@ -39,6 +39,7 @@
           '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2.1 2.1-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.5v.2h-3v-.2a1.7 1.7 0 0 0-1-1.5 1.7 1.7 0 0 0-1.9.3l-.1.1L6.6 17l.1-.1A1.7 1.7 0 0 0 7 15a1.7 1.7 0 0 0-1.5-1H5.3v-3h.2A1.7 1.7 0 0 0 7 10a1.7 1.7 0 0 0-.3-1.9L6.6 8 8.7 5.9l.1.1a1.7 1.7 0 0 0 1.9.3 1.7 1.7 0 0 0 1-1.5v-.2h3v.2a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.9-.3l.1-.1L19.8 8l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.5 1h.2v3h-.2a1.7 1.7 0 0 0-1.5 1Z"/>',
         file: '<path d="M6 3h8l4 4v14H6zM14 3v5h5M9 13h6M9 17h6"/>',
         close: '<path d="m6 6 12 12M18 6 6 18"/>',
+        clear: '<path d="M6 7h12M10 7V5h4v2M8 7l1 12h6l1-12M11 11v4m2-4v4"/>',
       })[name]
     }</svg>`;
   const esc = (v) =>
@@ -87,7 +88,15 @@
         request.onerror = () => reject(request.error);
       });
     };
-    return { read, write };
+    const clear = async () => {
+      const db = await open();
+      return new Promise((resolve, reject) => {
+        const request = db.transaction("workspace", "readwrite").objectStore("workspace").delete("current");
+        request.onsuccess = () => resolve();
+        request.onerror = () => reject(request.error);
+      });
+    };
+    return { read, write, clear };
   })();
   function queueLocalSave() {
     clearTimeout(state.persistTimer);
@@ -414,6 +423,25 @@
     Object.assign(t, { updatedAt: new Date().toISOString() });
     dirty(active());
   }
+  async function clearBrowserWorkspace() {
+    if (!window.confirm("Clear this browser's NorthStar workspace? This removes only the local recovery copy. Your Markdown file will not be changed.")) {
+      return;
+    }
+    try {
+      clearTimeout(state.persistTimer);
+      await localDb.clear();
+      state.workspaces.clear();
+      state.activeId = null;
+      state.selectedId = null;
+      state.undo = null;
+      state.menuOpen = false;
+      state.file = { handle: null, fileName: "northstar.md", revision: null };
+      state.notice = "Cleared this browser's NorthStar workspace. Your Markdown files were not changed.";
+      render();
+    } catch (e) {
+      notice(`Could not clear this browser workspace: ${e.message}`);
+    }
+  }
   function menu(w) {
     const undo = state.undo?.workspaceId === w.id;
     return `<div class="lite-menu" ${
@@ -422,13 +450,15 @@
       icon("upload")
     }Open / replace Markdown workspace</button><button class="lite-menu-item" data-action="history">${
       icon("restore")
-    }History</button><div class="lite-menu-separator"></div>${
+    }History</button>${
       undo
-        ? `<button class="lite-menu-item" data-action="undo">${
+        ? `<div class="lite-menu-separator"></div><button class="lite-menu-item" data-action="undo">${
           icon("restore")
         }Undo ${state.undo.kind}</button>`
         : ""
-    }<div class="lite-menu-separator"></div><div class="lite-menu-section">Settings</div><button class="lite-menu-item" data-action="settings">${
+    }<button class="lite-menu-item lite-menu-danger" data-action="clear-browser">${
+      icon("clear")
+    }Clear browser workspace</button><div class="lite-menu-separator"></div><div class="lite-menu-section">Settings</div><button class="lite-menu-item" data-action="settings">${
       icon("settings")
     }Settings</button></div>`;
   }
@@ -700,6 +730,7 @@
         }
         else if (a === "save") save();
         else if (a === "open-workspace") { state.menuOpen = false; picker(Boolean(window.showOpenFilePicker)); }
+        else if (a === "clear-browser") void clearBrowserWorkspace();
         else if (a === "history") { state.historyOpen = true; state.menuOpen = false; render(); }
         else if (a === "toggle-menu") {
           state.menuOpen = !state.menuOpen;
