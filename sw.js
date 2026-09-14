@@ -1,4 +1,4 @@
-const CACHE = "northstar-lite-shell-v16";
+const CACHE = "northstar-lite-shell-v24";
 const SHELL = [
   "./", "./index.html", "./app.js", "./northstar-markdown.js",
   "./lite-enhancements.css", "./manifest.webmanifest",

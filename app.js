@@ -234,16 +234,35 @@
       (new Date(`${date}T12:00:00`) - new Date(`${today()}T12:00:00`)) / 86400000,
     );
   }
+  function oldestOverdueDay(w = active()) {
+    return Math.min(
+      0,
+      ...(w?.tasks || [])
+        .filter((t) => !["completed", "cancelled", "deleted"].includes(t.status))
+        .map((t) => dayOffset(t.dueDate))
+        .filter((days) => days !== null && days < 0),
+    );
+  }
+  function urgentX(days, oldestOverdue) {
+    if (oldestOverdue < 0) {
+      // Reserve the urgent end for overdue work: older overdue dates sit farther right.
+      if (days < 0) return 74 + (-days / -oldestOverdue) * 14;
+      return 58 + (7 - days) * (16 / 7);
+    }
+    return 88 - days * (30 / 7);
+  }
   function timeline(w = active()) {
     const activeDays = (w?.tasks || [])
       .filter((t) => !["completed", "cancelled", "deleted"].includes(t.status))
       .map((t) => dayOffset(t.dueDate))
-      .filter((days) => days !== null && days >= 0);
+      .filter((days) => days !== null);
     const futureDays = activeDays.filter((days) => days > 7);
+    const overdueDays = activeDays.filter((days) => days < 0);
+    const oldestOverdue = Math.min(0, ...overdueDays);
     const taskDays = new Set(activeDays);
     // Show reference dates on the non-urgent side, plus every active due date.
     const farthest = Math.max(28, ...futureDays);
-    const days = [...new Set([0, 1, 2, 3, 4, 5, 6, 7, 8, 14, 21, 28, ...futureDays])]
+    const days = [...new Set([0, 1, 2, 3, 4, 5, 6, 7, 8, 14, 21, 28, ...overdueDays, ...futureDays])]
       .filter((offset) => offset <= farthest)
       .sort((a, b) => b - a);
     const base = new Date(`${today()}T12:00:00`);
@@ -251,7 +270,7 @@
       const d = new Date(base);
       d.setDate(base.getDate() + offset);
       const x = offset <= 7
-        ? 88 - offset * (30 / 7)
+        ? urgentX(offset, oldestOverdue)
         : 42 - ((offset - 7) / (farthest - 7)) * 30;
       return {
         offset,
@@ -292,9 +311,10 @@
       28,
       ...(w?.tasks || []).map((task) => dayOffset(task.dueDate)).filter((offset) => offset !== null && offset > 7),
     );
+    const oldestOverdue = oldestOverdueDay(w);
     const x = days > 7
       ? 42 - ((days - 7) / (farthest - 7)) * 30
-      : Math.max(58, Math.min(88, 88 - Math.max(0, days) * (30 / 7)));
+      : Math.max(58, Math.min(88, urgentX(days, oldestOverdue)));
     return { x, y: t.importance === "important" ? 22 : 66 };
   }
   function notice(m) {
@@ -419,7 +439,7 @@
       "less-important": [60, 68, 76, 84],
     };
     const occupied = { important: [[], [], [], []], "less-important": [[], [], [], []] };
-    const width = Math.min(28, Math.max(18, 250 / Math.max(root.clientWidth, 1) * 100));
+    const width = Math.min(25, Math.max(16, 210 / Math.max(root.clientWidth, 1) * 100));
     return w.tasks.filter((t) =>
       !["completed", "cancelled", "deleted"].includes(t.status) &&
       (!state.search || `${t.title} ${t.notes} ${(t.tags || []).join(" ")} ${t.project || ""}`.toLowerCase().includes(q))
@@ -446,7 +466,7 @@
         d
           ? `<span class="lite-task-due ${
             d === "Today" || d === "Overdue" ? "is-today" : ""
-          }">${d}</span>`
+          }${d === "Overdue" ? " is-overdue" : ""}">${d}</span>`
           : ""
       }</button></article>`;
     }).join("");
@@ -519,7 +539,7 @@
         icon("more")
       }</button>${
         menu(w)
-      }</div></div></header><section class="lite-stage lite-three-quadrant" aria-label="Three-area priority canvas"><div class="lite-axis lite-axis-y"><span class="axis-label axis-important">Important</span><span class="axis-label axis-not-important">Not Important<br><small>urgent only</small></span></div><div class="lite-axis lite-axis-x"><span class="axis-label">Not Urgent</span><div class="timeline">${timeline(w).map((tick) => `<span class="${tick.showLabel ? "" : "is-label-hidden"}" style="--tick-x:${tick.x}%" title="${esc(tick.label)}">${esc(tick.label)}</span>`).join("")}</div><span class="axis-label">Urgent</span></div><div class="lite-task-layer">${
+      }</div></div></header><section class="lite-stage lite-three-quadrant" aria-label="Three-area priority canvas"><div class="lite-axis lite-axis-y"><span class="axis-label axis-important">Important</span><span class="axis-label axis-not-important">Not Important</span></div><div class="lite-axis lite-axis-x"><span class="axis-label">Not Urgent</span><div class="timeline">${timeline(w).map((tick) => `<span class="${tick.showLabel ? "" : "is-label-hidden"}" style="--tick-x:${tick.x}%" title="${esc(tick.label)}">${esc(tick.label)}</span>`).join("")}</div><span class="axis-label">Urgent</span></div><div class="lite-task-layer">${
         tasks(w)
       }</div>${panel(w)}</section><p class="lite-toast" role="status">${
         esc(state.notice)
@@ -578,7 +598,16 @@
     if (input) {
       input.addEventListener("input", () => {
         state.query = input.value;
-        if (state.search) render();
+        if (state.search) {
+          const selectionStart = input.selectionStart;
+          const selectionEnd = input.selectionEnd;
+          render();
+          const next = root.querySelector(".lite-capture");
+          next?.focus();
+          if (next && selectionStart !== null && selectionEnd !== null) {
+            next.setSelectionRange(selectionStart, selectionEnd);
+          }
+        }
       });
       input.addEventListener("keydown", (e) => {
         if (!state.search && e.key.toLowerCase() === "i" && !input.value) {
