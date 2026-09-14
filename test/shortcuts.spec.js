@@ -3,6 +3,7 @@ const { test, expect } = require("@playwright/test");
 test("quick capture recognizes weekdays and relative date phrases", async ({ page }) => {
   await page.goto("/");
   await page.getByRole("button", { name: "Start a new Markdown file" }).click();
+  await expect(page.getByRole("button", { name: "Work", exact: true })).toHaveClass(/active/);
   const expected = await page.evaluate(() => {
     const local = (date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
     const base = new Date();

@@ -157,7 +157,8 @@
     }
     state.activeId = id;
   }
-  function loadProfiles(items, file = state.file, activeId = "personal") {
+  function loadProfiles(items, file = state.file, activeId = "work") {
+    const sourceIds = items.map((item) => /work/i.test(`${item.id} ${item.title}`) ? "work" : "personal");
     state.workspaces.clear();
     items.forEach((item) => {
       item.tasks.forEach(normalizeTaskPriority);
@@ -167,7 +168,11 @@
     if (!state.workspaces.has("work")) state.workspaces.set("work", blank("work"));
     state.file = { handle: file?.handle || null, fileName: file?.fileName || "northstar.md", revision: file?.revision || null };
     profiles().forEach((profile) => { profile.fileName = state.file.fileName; profile.handle = state.file.handle; profile.revision = state.file.revision; });
-    state.activeId = state.workspaces.has(activeId) ? activeId : "personal";
+    state.activeId = sourceIds.includes(activeId)
+      ? activeId
+      : sourceIds.includes("work")
+      ? "work"
+      : sourceIds[0] || "work";
   }
   function due(d) {
     if (!d) return "";
@@ -318,7 +323,7 @@
     try {
       const text = await file.text();
       const parsed = parseWorkspaceMarkdown(text, file.name);
-      loadProfiles(parsed.profiles, { handle, fileName: file.name || "northstar.md", revision: await hash(text) }, state.activeId || "personal");
+      loadProfiles(parsed.profiles, { handle, fileName: file.name || "northstar.md", revision: await hash(text) }, state.activeId || "work");
       state.selectedId = null;
       state.notice = parsed.warnings.join(" ") || "Opened one NorthStar workspace file.";
       queueLocalSave();
@@ -706,10 +711,10 @@
         if (a === "direct-open") picker(true);
         else if (a === "reconnect") void reconnect();
         else if (a === "new-workspace") {
-          const workspace = blank("personal");
+          const workspace = blank("work");
           workspace.dirty = true;
           addWorkspace(workspace);
-          state.notice = "New Personal workspace — save when you are ready to create its Markdown file.";
+          state.notice = "New Work workspace — save when you are ready to create its Markdown file.";
           render();
         }
         else if (a === "save") save();

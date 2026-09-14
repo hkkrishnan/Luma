@@ -81,6 +81,7 @@ test("one Markdown workspace preserves profiles and aligns same-date tasks", asy
 
   await page.reload();
   await page.locator("#markdown-file").setInputFiles(path);
+  await page.getByRole("button", { name: "Personal", exact: true }).click();
   await expect(page.getByText("First important task")).toBeVisible();
   expect(await positions(page)).toEqual(before);
 });
