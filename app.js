@@ -506,7 +506,7 @@
     if (!t) {
       return `<section class="lite-notes"><div class="lite-notes-heading"><span class="notes-glyph">${
         icon("file")
-      }</span>Notes</div><p class="lite-notes-helper">Jot down ideas, thoughts, or reminders...</p><textarea class="lite-notes-input" aria-label="${w.title} notes" placeholder="Write a note…">${
+      }</span>Notes</div><textarea class="lite-notes-input" aria-label="${w.title} notes" placeholder="Write a note…">${
         esc(w.notes)
       }</textarea></section>`;
     }
@@ -548,10 +548,10 @@
       });
     root.innerHTML =
       `<main class="lite-canvas"><header class="lite-topbar"><div class="lite-identity"><time class="lite-date">${date}</time><div class="lite-switcher" role="group" aria-label="Workspace"><button class="lite-switch ${
-        w.id === "personal" ? "active" : ""
-      }" data-workspace="personal">Personal</button><button class="lite-switch ${
         w.id === "work" ? "active" : ""
-      }" data-workspace="work">Work</button></div>${w.dirty ? '<span class="lite-dirty" title="Unsaved changes" aria-label="Unsaved changes"></span>' : ""}</div><div class="lite-actions"><div class="lite-capture-wrap"><span class="lite-capture-icon">${
+      }" data-workspace="work">Work</button><button class="lite-switch ${
+        w.id === "personal" ? "active" : ""
+      }" data-workspace="personal">Personal</button></div>${w.dirty ? '<span class="lite-dirty" title="Unsaved changes" aria-label="Unsaved changes"></span>' : ""}</div><div class="lite-actions"><div class="lite-capture-wrap"><span class="lite-capture-icon">${
         icon("plus")
       }</span><input class="lite-capture" aria-label="${
         state.search ? "Search tasks" : "Add a task"
