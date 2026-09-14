@@ -192,6 +192,62 @@
     /may/i, /jun(?:e)?/i, /jul(?:y)?/i, /aug(?:ust)?/i,
     /sept?(?:ember)?/i, /oct(?:ober)?/i, /nov(?:ember)?/i, /dec(?:ember)?/i,
   ];
+  const weekdayPattern = "sun(?:day)?|mon(?:day)?|tue(?:sday|s)?|wed(?:nesday)?|thu(?:rsday|rs)?|fri(?:day)?|sat(?:urday)?";
+  const weekdayIndex = { sun: 0, mon: 1, tue: 2, wed: 3, thu: 4, fri: 5, sat: 6 };
+  function dateForWeekday(base, weekday, modifier = "") {
+    const target = weekdayIndex[weekday.slice(0, 3).toLowerCase()];
+    let offset = (target - base.getDay() + 7) % 7;
+    if (modifier === "next") offset += 7;
+    const candidate = new Date(base);
+    candidate.setDate(candidate.getDate() + offset);
+    return candidate;
+  }
+  function dateForNextMonday(base) {
+    const candidate = new Date(base);
+    candidate.setDate(candidate.getDate() + ((8 - candidate.getDay()) % 7 || 7));
+    return candidate;
+  }
+  function parseDueDate(text) {
+    const base = new Date(`${today()}T12:00:00`);
+    const iso = text.match(/\b(\d{4}-\d{2}-\d{2})\b/);
+    if (iso && !Number.isNaN(new Date(`${iso[1]}T12:00:00`).getTime())) return { dueDate: iso[1], token: iso[0] };
+    const named = text.match(/\b(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sept?(?:ember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\s+(\d{1,2})(?:st|nd|rd|th)?(?:,?\s+(\d{4}))?\b/i);
+    if (named) {
+      const month = monthNames.findIndex((pattern) => pattern.test(named[1]));
+      let year = named[3] ? Number(named[3]) : base.getFullYear();
+      let candidate = new Date(year, month, Number(named[2]), 12);
+      const valid = candidate.getMonth() === month && candidate.getDate() === Number(named[2]);
+      if (valid) {
+        if (!named[3] && candidate < base) candidate = new Date(++year, month, Number(named[2]), 12);
+        return { dueDate: localDate(candidate), token: named[0] };
+      }
+    }
+    const interval = text.match(/\b(?:in\s+)?(\d+)\s+(day|week)s?(?:\s+from\s+now)?\b/i);
+    if (interval) {
+      const candidate = new Date(base);
+      candidate.setDate(candidate.getDate() + Number(interval[1]) * (interval[2].toLowerCase() === "week" ? 7 : 1));
+      return { dueDate: localDate(candidate), token: interval[0] };
+    }
+    const simple = text.match(/\b(today|tomorrow|yesterday|next\s+week|next\s+month|end\s+of\s+(?:the\s+)?month|end\s+of\s+(?:the\s+)?week|(?:this|next)\s+weekend)\b/i);
+    if (simple) {
+      const token = simple[1].toLowerCase().replace(/\s+/g, " ");
+      const candidate = new Date(base);
+      if (token === "tomorrow") candidate.setDate(candidate.getDate() + 1);
+      else if (token === "yesterday") candidate.setDate(candidate.getDate() - 1);
+      else if (token === "next week") return { dueDate: localDate(dateForNextMonday(base)), token: simple[0] };
+      else if (token === "next month") return { dueDate: localDate(new Date(base.getFullYear(), base.getMonth() + 1, 1, 12)), token: simple[0] };
+      else if (token.includes("end of") && token.includes("month")) return { dueDate: localDate(new Date(base.getFullYear(), base.getMonth() + 1, 0, 12)), token: simple[0] };
+      else if (token.includes("end of")) candidate.setDate(candidate.getDate() + ((7 - candidate.getDay()) % 7));
+      else if (token.includes("weekend")) return { dueDate: localDate(dateForWeekday(base, "saturday", token.startsWith("next") ? "next" : "")), token: simple[0] };
+      return { dueDate: localDate(candidate), token: simple[0] };
+    }
+    const weekday = text.match(new RegExp("\\b(?:(this|next)\\s+)?(" + weekdayPattern + ")\\b", "i"));
+    if (weekday) return {
+      dueDate: localDate(dateForWeekday(base, weekday[2], (weekday[1] || "").toLowerCase())),
+      token: weekday[0],
+    };
+    return { dueDate: null, token: null };
+  }
   function priorityFor(dueDate, importance = "less-important") {
     const urgency = urgencyFor(dueDate);
     // The canvas deliberately has no "not important + not urgent" state.
@@ -206,36 +262,11 @@
     return task;
   }
   function parseCapture(value) {
-    let title = value.trim(), dueDate = null;
-    const base = new Date(`${today()}T12:00:00`);
-    const iso = title.match(/\b(\d{4}-\d{2}-\d{2})\b/);
-    const named = title.match(/\b(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sept?(?:ember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\s+(\d{1,2})(?:st|nd|rd|th)?(?:,?\s+(\d{4}))?\b/i);
-    const relative = title.match(/\b(today|tomorrow|next\s+(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday))\b/i);
-    if (iso && !Number.isNaN(new Date(`${iso[1]}T12:00:00`).getTime())) {
-      dueDate = iso[1]; title = title.replace(iso[0], " ").replace(/\s+/g, " ").trim();
-    } else if (named) {
-      const month = monthNames.findIndex((pattern) => pattern.test(named[1]));
-      let year = named[3] ? Number(named[3]) : base.getFullYear();
-      let candidate = new Date(year, month, Number(named[2]), 12);
-      const valid = candidate.getMonth() === month && candidate.getDate() === Number(named[2]);
-      if (valid) {
-        // A month/day without a year means the next occurrence of that date.
-        if (!named[3] && candidate < base) candidate = new Date(++year, month, Number(named[2]), 12);
-        dueDate = localDate(candidate);
-        title = title.replace(named[0], " ").replace(/\s+/g, " ").trim();
-      }
-    } else if (relative) {
-      const token = relative[1].toLowerCase();
-      if (token === "tomorrow") base.setDate(base.getDate() + 1);
-      else if (token !== "today") {
-        const days = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
-        const target = days.indexOf(token.replace("next ", ""));
-        base.setDate(base.getDate() + ((target - base.getDay() + 7) % 7 || 7));
-      }
-      dueDate = base.toLocaleDateString("en-CA");
-      title = title.replace(relative[0], " ").replace(/\s+/g, " ").trim();
-    }
-    return { title: title || value.trim(), dueDate };
+    const parsed = parseDueDate(value.trim());
+    const title = parsed.token
+      ? value.trim().replace(parsed.token, " ").replace(/\s+/g, " ").trim()
+      : value.trim();
+    return { title: title || value.trim(), dueDate: parsed.dueDate };
   }
   function dayOffset(date) {
     if (!date) return null;
@@ -243,69 +274,25 @@
       (new Date(`${date}T12:00:00`) - new Date(`${today()}T12:00:00`)) / 86400000,
     );
   }
-  function oldestOverdueDay(w = active()) {
-    return Math.min(
-      0,
-      ...(w?.tasks || [])
-        .filter((t) => !["completed", "cancelled", "deleted"].includes(t.status))
-        .map((t) => dayOffset(t.dueDate))
-        .filter((days) => days !== null && days < 0),
-    );
-  }
-  function urgentX(days, oldestOverdue) {
-    if (oldestOverdue < 0) {
-      // Reserve the urgent end for overdue work: older overdue dates sit farther right.
-      if (days < 0) return 74 + (-days / -oldestOverdue) * 14;
-      return 58 + (7 - days) * (16 / 7);
-    }
-    return 88 - days * (30 / 7);
-  }
-  function timeline(w = active()) {
-    const activeDays = (w?.tasks || [])
-      .filter((t) => !["completed", "cancelled", "deleted"].includes(t.status))
-      .map((t) => dayOffset(t.dueDate))
-      .filter((days) => days !== null);
-    const futureDays = activeDays.filter((days) => days > 7);
-    const overdueDays = activeDays.filter((days) => days < 0);
-    const oldestOverdue = Math.min(0, ...overdueDays);
-    const taskDays = new Set(activeDays);
-    // Show reference dates on the non-urgent side, plus every active due date.
-    const farthest = Math.max(28, ...futureDays);
-    const days = [...new Set([0, 1, 2, 3, 4, 5, 6, 7, 8, 14, 21, 28, ...overdueDays, ...futureDays])]
-      .filter((offset) => offset <= farthest)
-      .sort((a, b) => b - a);
+  const TIMELINE_DAYS = 42;
+  const TIMELINE_LEFT = 10;
+  const TIMELINE_TODAY = 76;
+  const OVERDUE_X = 88;
+  function timeline() {
     const base = new Date(`${today()}T12:00:00`);
-    const ticks = days.map((offset) => {
+    const weeklyOffsets = [42, 35, 28, 21, 14, 7, 0];
+    const weeklyTicks = weeklyOffsets.map((offset) => {
       const d = new Date(base);
       d.setDate(base.getDate() + offset);
-      const x = offset <= 7
-        ? urgentX(offset, oldestOverdue)
-        : 42 - ((offset - 7) / (farthest - 7)) * 30;
       return {
         offset,
-        label: d.toLocaleDateString(undefined, { month: "short", day: "numeric" }),
-        x,
-        isTaskDate: taskDays.has(offset),
+        // The far-left boundary groups dates outside the visible six-week window.
+        label: offset === TIMELINE_DAYS ? "Later" : d.toLocaleDateString(undefined, { month: "short", day: "numeric" }),
+        x: TIMELINE_TODAY - offset * ((TIMELINE_TODAY - TIMELINE_LEFT) / TIMELINE_DAYS),
+        showLabel: true,
       };
     });
-    // Keep dots for every date, but only render labels that have enough room.
-    const visible = [];
-    return ticks.sort((a, b) => a.x - b.x).map((tick) => {
-      const previous = visible[visible.length - 1];
-      if (!previous || tick.x - previous.x >= 7) {
-        const labeled = { ...tick, showLabel: true };
-        visible.push(labeled);
-        return labeled;
-      }
-      if (tick.isTaskDate && !previous.isTaskDate) {
-        previous.showLabel = false;
-        visible.pop();
-        const labeled = { ...tick, showLabel: true };
-        visible.push(labeled);
-        return labeled;
-      }
-      return { ...tick, showLabel: false };
-    });
+    return [...weeklyTicks, { label: "Overdue", x: OVERDUE_X, showLabel: true }];
   }
   function quadrant(t) {
     const priority = priorityFor(t.dueDate, t.importance);
@@ -313,17 +300,14 @@
       ? (priority.urgency === "urgent" ? "do-first" : "schedule")
       : "reconsider";
   }
-  function position(t, i, w = active()) {
+  function position(t, i) {
     if (!t.dueDate) return { x: 18, y: 22 + (i % 4) * 7 };
     const days = dayOffset(t.dueDate);
-    const farthest = Math.max(
-      28,
-      ...(w?.tasks || []).map((task) => dayOffset(task.dueDate)).filter((offset) => offset !== null && offset > 7),
-    );
-    const oldestOverdue = oldestOverdueDay(w);
-    const x = days > 7
-      ? 42 - ((days - 7) / (farthest - 7)) * 30
-      : Math.max(58, Math.min(88, urgentX(days, oldestOverdue)));
+    // A stable six-week scale keeps Personal and Work visually comparable.
+    const x = days < 0
+      ? OVERDUE_X
+      : TIMELINE_TODAY - Math.min(TIMELINE_DAYS, days) *
+        ((TIMELINE_TODAY - TIMELINE_LEFT) / TIMELINE_DAYS);
     return { x, y: t.importance === "important" ? 22 : 66 };
   }
   function notice(m) {

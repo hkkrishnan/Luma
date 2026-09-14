@@ -67,7 +67,7 @@ test("one Markdown workspace preserves profiles and aligns same-date tasks", asy
   const tickPositions = await page.locator(".timeline span").evaluateAll((nodes) =>
     nodes.map((node) => Number.parseFloat(node.style.getPropertyValue("--tick-x"))),
   );
-  expect(tickPositions.every((x) => x <= 42 || x >= 58)).toBe(true);
+  expect(tickPositions).toEqual([10, 21, 32, 43, 54, 65, 76, 88]);
 
   const downloadPromise = page.waitForEvent("download");
   await page.getByLabel("Save current Markdown workspace").click();

@@ -1,10 +1,47 @@
 const { test, expect } = require("@playwright/test");
 
+test("quick capture recognizes weekdays and relative date phrases", async ({ page }) => {
+  await page.goto("/");
+  await page.getByRole("button", { name: "Start a new Markdown file" }).click();
+  const expected = await page.evaluate(() => {
+    const local = (date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+    const base = new Date();
+    base.setHours(12, 0, 0, 0);
+    const thursday = new Date(base);
+    thursday.setDate(thursday.getDate() + ((4 - thursday.getDay() + 7) % 7));
+    const nextThursday = new Date(thursday);
+    nextThursday.setDate(nextThursday.getDate() + 7);
+    const inThreeDays = new Date(base);
+    inThreeDays.setDate(inThreeDays.getDate() + 3);
+    const endOfMonth = new Date(base.getFullYear(), base.getMonth() + 1, 0, 12);
+    return {
+      thursday: local(thursday),
+      nextThursday: local(nextThursday),
+      inThreeDays: local(inThreeDays),
+      endOfMonth: local(endOfMonth),
+    };
+  });
+  const examples = [
+    ["Review log Thursday", "Review log", expected.thursday],
+    ["Follow up next Thursday", "Follow up", expected.nextThursday],
+    ["Ship draft in 3 days", "Ship draft", expected.inThreeDays],
+    ["Close books end of month", "Close books", expected.endOfMonth],
+  ];
+  for (const [entry, title, dueDate] of examples) {
+    await page.keyboard.press("/");
+    await page.keyboard.type(entry);
+    await page.keyboard.press("Enter");
+    await page.getByText(title, { exact: true }).click();
+    await expect(page.locator("#task-due")).toHaveValue(dueDate);
+  }
+});
+
 test("slash capture assigns importance and derives urgency from the due date", async ({ page }) => {
   await page.goto("/");
   await page.getByRole("button", { name: "Start a new Markdown file" }).click();
   const today = await page.evaluate(() => new Date().toLocaleDateString(undefined, { month: "short", day: "numeric" }));
-  await expect(page.locator(".timeline span").last()).toHaveText(today);
+  await expect(page.locator(".timeline span", { hasText: today })).toHaveCount(1);
+  await expect(page.locator(".timeline span").first()).toHaveText("Later");
 
   await page.keyboard.press("/");
   await expect(page.getByLabel("Add a task")).toBeFocused();
@@ -32,7 +69,7 @@ test("slash capture assigns importance and derives urgency from the due date", a
   const laterTask = page.locator(".lite-task", { hasText: "Plan release" });
   await expect(laterTask).toHaveClass(/task-schedule/);
   await expect(laterTask).toContainText(namedDate);
-  await expect(page.locator(".timeline span", { hasText: namedDate })).toHaveCount(1);
+  await expect(page.locator(".timeline span")).toHaveCount(8);
 
   await page.getByText("Plan release").click();
   await expect(page.locator("#task-importance")).toHaveValue("important");
