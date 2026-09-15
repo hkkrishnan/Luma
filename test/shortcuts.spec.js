@@ -1,5 +1,47 @@
 const { test, expect } = require("@playwright/test");
 
+test("an undated task groups at the Later marker without gaining a due date", async ({ page }) => {
+  await page.goto("/");
+  await page.getByRole("button", { name: "Start a new Markdown file" }).click();
+  await expect(page.locator(".axis-important")).toHaveText("Important");
+  await expect(page.locator(".axis-not-important span")).toHaveText(["Not", "Important"]);
+  const [axis, not, important] = await Promise.all([
+    page.locator(".lite-axis-y").boundingBox(),
+    page.locator(".axis-not-important span").first().boundingBox(),
+    page.locator(".axis-not-important span").last().boundingBox(),
+  ]);
+  expect(not.x + not.width).toBeLessThan(axis.x);
+  expect(important.x).toBeGreaterThan(axis.x);
+  await page.keyboard.press("/");
+  await page.keyboard.type("Unscheduled task");
+  await page.keyboard.press("Enter");
+  const task = page.locator(".lite-task", { hasText: "Unscheduled task" });
+  await expect(task).toHaveCSS("--x", "10%");
+  await expect(task.locator(".lite-task-due")).toHaveText("Later");
+  await page.getByText("Unscheduled task", { exact: true }).click();
+  await expect(page.locator("#task-due")).toHaveValue("");
+});
+
+test("dense same-date tasks receive separate vertical lanes", async ({ page }) => {
+  await page.goto("/");
+  await page.getByRole("button", { name: "Start a new Markdown file" }).click();
+  const dueDate = await page.evaluate(() => {
+    const date = new Date();
+    date.setDate(date.getDate() + 3);
+    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+  });
+  for (let number = 1; number <= 6; number += 1) {
+    await page.keyboard.press("/");
+    await page.keyboard.type(`Dense task ${number} ${dueDate}`);
+    await page.keyboard.press("Enter");
+  }
+  const verticalPositions = await page.locator(".lite-task").evaluateAll((nodes) =>
+    nodes.map((node) => node.style.getPropertyValue("--y")),
+  );
+  expect(new Set(verticalPositions).size).toBe(6);
+  await expect(page.locator(".lite-task-due")).toHaveCount(1);
+});
+
 test("quick capture recognizes weekdays and relative date phrases", async ({ page }) => {
   await page.goto("/");
   await page.getByRole("button", { name: "Start a new Markdown file" }).click();
@@ -70,7 +112,7 @@ test("slash capture assigns importance and derives urgency from the due date", a
   const laterTask = page.locator(".lite-task", { hasText: "Plan release" });
   await expect(laterTask).toHaveClass(/task-schedule/);
   await expect(laterTask).toContainText(namedDate);
-  await expect(page.locator(".timeline span")).toHaveCount(8);
+  await expect(page.locator(".timeline span")).toHaveCount(9);
 
   await page.getByText("Plan release").click();
   await expect(page.locator("#task-importance")).toHaveValue("important");
@@ -86,7 +128,7 @@ test("slash capture assigns importance and derives urgency from the due date", a
   await page.reload();
   await expect(page.getByText("Plan release")).toBeVisible();
   await page.getByRole("button", { name: "Open workspace menu" }).click();
-  const clear = page.getByRole("button", { name: "Clear browser workspace" });
+  const clear = page.getByRole("button", { name: "Clear browser copy" });
   await expect(clear).toBeVisible();
   page.once("dialog", (dialog) => dialog.accept());
   await clear.click();

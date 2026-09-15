@@ -7,26 +7,34 @@
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self'; img-src 'self' blob: data:; style-src 'self' 'unsafe-inline'; script-src 'self'; worker-src 'self' blob:"/>
   <title>NorthStar Lite</title>
   <script src="./northstar-markdown.js?v=2" defer></script>
-  <script src="./app.js?v=23" defer></script>
+  <script src="./app.js?v=29" defer></script>
   <link rel="stylesheet" href="./lite-enhancements.css?v=28">
   <style>
     .lite-menu-item .lite-icon { flex: 0 0 19px; align-self: center; }
+    .lite-menu-item { white-space: nowrap; }
     .lite-menu-item[data-action="settings"] .lite-icon { width: 20px; height: 20px; }
     .lite-menu-danger { color: #a14f52; }
-    .lite-canvas { padding: 12px 20px 18px; }
-    .lite-topbar { gap: 16px; }
-    .lite-identity { gap: 14px; }
-    .lite-date { font-size: 17px; }
-    .lite-switcher { gap: 14px; }
-    .lite-switch { min-height: 24px; padding: 2px 0; font-size: 12px; }
-    .lite-capture-wrap { width: min(360px, 30vw); min-width: 240px; height: 42px; padding: 0 8px 0 11px; }
-    .lite-capture { height: 40px; font-size: 13px; }
-    .lite-capture-icon { width: 24px; margin-right: 5px; }
-    .lite-mode-button { width: 28px; height: 28px; }
-    .lite-save, .lite-menu-button { width: 38px; height: 38px; }
-    .lite-actions::before { height: 34px; margin: 0 12px 0 16px; }
-    .lite-save { margin-right: 7px; }
-    .lite-stage { min-height: calc(100vh - 78px); margin-top: 4px; }
+    .lite-canvas { padding: 6px 14px 12px; }
+    .lite-topbar { gap: 10px; }
+    .lite-identity { gap: 10px; }
+    .lite-date { font-size: 15px; }
+    .lite-switcher { gap: 11px; }
+    .lite-switch { min-height: 20px; padding: 1px 0; font-size: 11px; }
+    .lite-capture-wrap { width: min(320px, 27vw); min-width: 220px; height: 36px; padding: 0 7px 0 9px; }
+    .lite-capture { height: 34px; font-size: 12px; }
+    .lite-capture-icon { width: 20px; margin-right: 4px; }
+    .lite-mode-button { width: 25px; height: 25px; }
+    .lite-save, .lite-menu-button { width: 32px; height: 32px; }
+    .lite-actions::before { height: 28px; margin: 0 9px 0 12px; }
+    .lite-save { margin-right: 5px; }
+    .lite-stage { min-height: calc(100vh - 58px); margin-top: 2px; }
+    .lite-axis-y { top: 0; bottom: 0; }
+    .lite-axis-y .axis-important { left: -58px; width: 116px; transform: none; text-align: center; }
+    .lite-axis-y .axis-not-important { bottom: 16px; }
+    .lite-axis-y .axis-not-important { left: 0; width: 0; display: block; text-align: initial; }
+    .lite-axis-y .axis-not-important span { position: absolute; bottom: 0; display: block; white-space: nowrap; }
+    .lite-axis-y .axis-not-important span:first-child { right: 5px; }
+    .lite-axis-y .axis-not-important span:last-child { left: 5px; }
     .lite-notes-input { height: calc(100% - 44px); margin-top: 12px; }
     .lite-capture:focus-visible, .lite-notes-input:focus-visible { outline: 0; }
     .lite-axis-x .axis-label:first-child { margin-left: 32px; }
@@ -41,8 +49,11 @@
     .lite-editor-notes { height: 56px; padding: 6px 7px; }
     .lite-editor-actions { margin-top: 10px; }
     .lite-editor-save, .lite-editor-delete { padding: 7px 10px; font-size: 12px; }
+    .lite-task-label { flex-direction: column; align-items: flex-start; gap: 1px; }
+    .lite-task-title { font-size: 12px; }
+    .lite-task-due, .lite-task-due.is-overdue { position: static; margin: 0; font-size: 9px; line-height: 1.1; }
     @media (max-width: 780px) {
-      .lite-canvas { padding: 10px 12px 18px; }
+      .lite-canvas { padding: 5px 9px 12px; }
       .lite-capture-wrap { min-width: 0; }
       .lite-axis-x::after { right: 14px; }
     }

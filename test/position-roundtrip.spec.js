@@ -60,14 +60,14 @@ test("one Markdown workspace preserves profiles and aligns same-date tasks", asy
   });
   await expect(page.getByText("First important task")).toBeVisible();
   await page.getByRole("button", { name: "Open workspace menu" }).click();
-  await expect(page.getByRole("button", { name: "Open / replace Markdown workspace" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Open Markdown" })).toBeVisible();
   const before = await positions(page);
   expect(before.find((item) => item.id === "first").x).toBe(before.find((item) => item.id === "second").x);
   expect(before.find((item) => item.id === "first").y).not.toBe(before.find((item) => item.id === "second").y);
   const tickPositions = await page.locator(".timeline span").evaluateAll((nodes) =>
-    nodes.map((node) => Number.parseFloat(node.style.getPropertyValue("--tick-x"))),
+    nodes.map((node) => Number(Number.parseFloat(node.style.getPropertyValue("--tick-x")).toFixed(2))),
   );
-  expect(tickPositions).toEqual([10, 21, 32, 43, 54, 65, 76, 88]);
+  expect(tickPositions).toEqual([10, 19.2, 28.4, 37.6, 46.8, 56, 67.43, 76, 88]);
 
   const downloadPromise = page.waitForEvent("download");
   await page.getByLabel("Save current Markdown workspace").click();

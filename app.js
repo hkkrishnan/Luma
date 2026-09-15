@@ -281,23 +281,30 @@
   }
   const TIMELINE_DAYS = 42;
   const TIMELINE_LEFT = 10;
+  const URGENT_START = 56;
   const TIMELINE_TODAY = 76;
   const OVERDUE_X = 88;
+  function timelineX(days) {
+    if (days <= 7) return TIMELINE_TODAY - days * ((TIMELINE_TODAY - URGENT_START) / 7);
+    return URGENT_START - Math.min(TIMELINE_DAYS, days - 7) *
+      ((URGENT_START - TIMELINE_LEFT) / (TIMELINE_DAYS - 7));
+  }
   function timeline() {
     const base = new Date(`${today()}T12:00:00`);
-    const weeklyOffsets = [42, 35, 28, 21, 14, 7, 0];
-    const weeklyTicks = weeklyOffsets.map((offset) => {
+    // Later work stays legible with weekly dates; the urgent week gets more room.
+    const offsets = [42, 35, 28, 21, 14, 7, 3, 0];
+    const ticks = offsets.map((offset) => {
       const d = new Date(base);
       d.setDate(base.getDate() + offset);
       return {
         offset,
         // The far-left boundary groups dates outside the visible six-week window.
         label: offset === TIMELINE_DAYS ? "Later" : d.toLocaleDateString(undefined, { month: "short", day: "numeric" }),
-        x: TIMELINE_TODAY - offset * ((TIMELINE_TODAY - TIMELINE_LEFT) / TIMELINE_DAYS),
+        x: timelineX(offset),
         showLabel: true,
       };
     });
-    return [...weeklyTicks, { label: "Overdue", x: OVERDUE_X, showLabel: true }];
+    return [...ticks, { label: "Overdue", x: OVERDUE_X, showLabel: true }];
   }
   function quadrant(t) {
     const priority = priorityFor(t.dueDate, t.importance);
@@ -306,13 +313,12 @@
       : "reconsider";
   }
   function position(t, i) {
-    if (!t.dueDate) return { x: 18, y: 22 + (i % 4) * 7 };
+    if (!t.dueDate) return { x: TIMELINE_LEFT, y: 22 + (i % 4) * 7 };
     const days = dayOffset(t.dueDate);
     // A stable six-week scale keeps Personal and Work visually comparable.
     const x = days < 0
       ? OVERDUE_X
-      : TIMELINE_TODAY - Math.min(TIMELINE_DAYS, days) *
-        ((TIMELINE_TODAY - TIMELINE_LEFT) / TIMELINE_DAYS);
+      : timelineX(days);
     return { x, y: t.importance === "important" ? 22 : 66 };
   }
   function notice(m) {
@@ -437,7 +443,7 @@
       state.menuOpen ? "" : "hidden"
     } role="menu"><div class="lite-menu-section">Workspace</div><button class="lite-menu-item" data-action="open-workspace">${
       icon("upload")
-    }Open / replace Markdown workspace</button><button class="lite-menu-item" data-action="history">${
+    }Open Markdown</button><button class="lite-menu-item" data-action="history">${
       icon("restore")
     }History</button>${
       undo
@@ -447,32 +453,61 @@
         : ""
     }<button class="lite-menu-item lite-menu-danger" data-action="clear-browser">${
       icon("clear")
-    }Clear browser workspace</button><div class="lite-menu-separator"></div><div class="lite-menu-section">Settings</div><button class="lite-menu-item" data-action="settings">${
+    }Clear browser copy</button><div class="lite-menu-separator"></div><div class="lite-menu-section">Settings</div><button class="lite-menu-item" data-action="settings">${
       icon("settings")
     }Settings</button></div>`;
   }
   function tasks(w) {
     const q = state.query.trim().toLowerCase();
-    const lanes = {
-      important: [12, 20, 28, 36],
-      "less-important": [60, 68, 76, 84],
-    };
-    const occupied = { important: [[], [], [], []], "less-important": [[], [], [], []] };
     const width = Math.min(25, Math.max(16, 210 / Math.max(root.clientWidth, 1) * 100));
-    return w.tasks.filter((t) =>
+    const cards = w.tasks.filter((t) =>
       !["completed", "cancelled", "deleted"].includes(t.status) &&
       (!state.search || `${t.title} ${t.notes} ${(t.tags || []).join(" ")} ${t.project || ""}`.toLowerCase().includes(q))
-    ).map((t, i) => {
-      const saved = position(t, i, w);
-      const band = t.importance === "important" ? "important" : "less-important";
+    ).map((t, i) => ({
+      t, i, saved: position(t, i, w),
+      band: t.importance === "important" ? "important" : "less-important",
+      lane: 0,
+    }));
+    const occupied = { important: [], "less-important": [] };
+    ["important", "less-important"].forEach((band) => cards
+      .filter((card) => card.band === band)
+      .sort((a, b) => a.saved.x - b.saved.x || a.i - b.i)
+      .forEach((card) => {
       const lane = occupied[band].findIndex((items) =>
-        !items.some((item) => saved.x < item.x + item.width + 1 && item.x < saved.x + width + 1),
+        !items.some((item) => card.saved.x < item.x + item.width + 1 && item.x < card.saved.x + width + 1),
       );
-      const laneIndex = lane === -1 ? occupied[band].length - 1 : lane;
-      // Cards may move vertically into a free lane, never away from their date.
-      occupied[band][laneIndex].push({ x: saved.x, width });
-      const p = { x: saved.x, y: lanes[band][laneIndex] };
-      const d = due(t.dueDate);
+      card.lane = lane === -1 ? occupied[band].length : lane;
+      if (!occupied[band][card.lane]) occupied[band][card.lane] = [];
+      occupied[band][card.lane].push({ x: card.saved.x, width });
+      }));
+    const laneCount = {
+      important: Math.max(1, occupied.important.length),
+      "less-important": Math.max(1, occupied["less-important"].length),
+    };
+    const laneY = (band, lane) => {
+      const [start, end] = band === "important" ? [5, 40] : [56, 91];
+      const count = laneCount[band];
+      return count === 1 ? (start + end) / 2 : start + lane * ((end - start) / (count - 1));
+    };
+    state.laneCount = laneCount;
+    const dateLeaders = new Set();
+    ["important", "less-important"].forEach((band) => {
+      const shownDates = new Set();
+      cards.filter((card) => card.band === band)
+        .sort((a, b) => a.lane - b.lane || a.i - b.i)
+        .forEach((card) => {
+          const groupDate = card.t.dueDate || "later";
+          if (!shownDates.has(groupDate)) {
+            shownDates.add(groupDate);
+            dateLeaders.add(card.t.id);
+          }
+        });
+    });
+    return cards.map(({ t, saved, band, lane }) => {
+      // Cards may move vertically into an available lane, never away from their date.
+      const p = { x: saved.x, y: laneY(band, lane) };
+      const d = due(t.dueDate) || "Later";
+      const showDate = dateLeaders.has(t.id);
       return `<article class="lite-task task-${quadrant(t)}" data-task="${
         esc(t.id)
       }" style="--x:${p.x}%;--y:${p.y}%"><button class="lite-task-dot" data-complete="${
@@ -482,7 +517,7 @@
       } complete"></button><button class="lite-task-label" data-select="${
         esc(t.id)
       }"><span class="lite-task-title" title="${esc(t.title)}">${esc(t.title)}</span>${
-        d
+        showDate
           ? `<span class="lite-task-due ${
             d === "Today" || d === "Overdue" ? "is-today" : ""
           }${d === "Overdue" ? " is-overdue" : ""}">${d}</span>`
@@ -567,6 +602,8 @@
       }><section class="lite-settings-card" role="dialog" aria-modal="true"><div class="lite-settings-header"><h2>Settings</h2><button data-action="close-settings" aria-label="Close settings">${
         icon("close")
       }</button></div><p>NorthStar Lite saves a private recovery copy in this browser. Save to Markdown when you want to update your file.</p><button class="lite-reset-layout" data-action="reset-layout">Reset current layout</button></section></div></main>`;
+    const notImportantLabel = root.querySelector(".axis-not-important");
+    if (notImportantLabel) notImportantLabel.innerHTML = "<span>Not</span><span>Important</span>";
     bind();
   }
   function drag(node, t) {
