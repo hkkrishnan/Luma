@@ -12,7 +12,7 @@
   <style>
     .lite-menu-item .lite-icon { flex: 0 0 19px; align-self: center; }
     .lite-menu-item { white-space: nowrap; }
-    .lite-menu-item[data-action="settings"] .lite-icon { width: 20px; height: 20px; }
+    .lite-menu-item[data-action="settings"] .lite-icon { flex: 0 0 20px; width: 20px; height: 20px; transform: translateY(-1px); }
     .lite-menu-danger { color: #a14f52; }
     .lite-canvas { padding: 6px 14px 12px; }
     .lite-topbar { gap: 10px; }
@@ -36,7 +36,7 @@
     .lite-axis-y .axis-not-important span:first-child { right: 5px; }
     .lite-axis-y .axis-not-important span:last-child { left: 5px; }
     .lite-notes-input { height: calc(100% - 44px); margin-top: 12px; }
-    .lite-capture:focus-visible, .lite-notes-input:focus-visible { outline: 0; }
+    .lite-capture:focus-visible, .lite-notes-input:focus-visible, .lite-editor-field:focus-visible, .lite-editor-notes:focus-visible { outline: 0; }
     .lite-axis-x .axis-label:first-child { margin-left: 32px; }
     .lite-axis-x .axis-label:last-child { margin-right: 32px; }
     .lite-axis-x::after { right: 35px; }
