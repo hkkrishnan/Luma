@@ -7,7 +7,7 @@
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self'; img-src 'self' blob: data:; style-src 'self' 'unsafe-inline'; script-src 'self'; worker-src 'self' blob:"/>
   <title>NorthStar Lite</title>
   <script src="./northstar-markdown.js?v=2" defer></script>
-  <script src="./app.js?v=29" defer></script>
+  <script src="./app.js?v=40" defer></script>
   <link rel="stylesheet" href="./lite-enhancements.css?v=28">
   <style>
     .lite-menu-item .lite-icon { flex: 0 0 19px; align-self: center; }
@@ -35,7 +35,8 @@
     .lite-axis-y .axis-not-important span { position: absolute; bottom: 0; display: block; white-space: nowrap; }
     .lite-axis-y .axis-not-important span:first-child { right: 5px; }
     .lite-axis-y .axis-not-important span:last-child { left: 5px; }
-    .lite-notes-input { height: calc(100% - 44px); margin-top: 12px; }
+    .lite-notes-input { height: calc(100% - 38px); margin-top: 6px; overflow: auto; white-space: pre-wrap; line-height: 1.45; }
+    .lite-notes-input:empty::before, .lite-editor-notes:empty::before { content: attr(data-placeholder); color: #8ba0ba; pointer-events: none; }
     .lite-capture:focus-visible, .lite-notes-input:focus-visible, .lite-editor-field:focus-visible, .lite-editor-notes:focus-visible { outline: 0; }
     .lite-axis-x .axis-label:first-child { margin-left: 32px; }
     .lite-axis-x .axis-label:last-child { margin-right: 32px; }
@@ -46,12 +47,26 @@
     .lite-editor-title { padding-bottom: 7px; font-size: 16px; }
     .lite-editor-label { gap: 3px; margin-top: 8px; }
     .lite-editor-field { height: 30px; padding: 4px 7px; }
-    .lite-editor-notes { height: 56px; padding: 6px 7px; }
+    .lite-editor-notes-label { margin-top: 6px; }
+    .lite-editor-notes { height: 56px; min-height: 56px; padding: 6px 7px; overflow: auto; resize: vertical; white-space: pre-wrap; line-height: 1.4; }
     .lite-editor-actions { margin-top: 10px; }
     .lite-editor-save, .lite-editor-delete { padding: 7px 10px; font-size: 12px; }
-    .lite-task-label { flex-direction: column; align-items: flex-start; gap: 1px; }
-    .lite-task-title { font-size: 12px; }
+    .lite-task { align-items: flex-start; }
+    .lite-task { inline-size: calc(var(--task-label-width) + 24px); }
+    .lite-task-dot { align-self: flex-start; margin-top: 1px; }
+    .lite-task-label { flex-direction: column; align-items: flex-start; gap: 2px; inline-size: var(--task-label-width); max-inline-size: var(--task-label-width); overflow: hidden; }
+    .lite-task-title { display: -webkit-box; max-width: 100%; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; white-space: normal; font-size: 12px; line-height: 1.18; }
     .lite-task-due, .lite-task-due.is-overdue { position: static; margin: 0; font-size: 9px; line-height: 1.1; }
+    .lite-task.is-compact .lite-task-label { gap: 0; }
+    .lite-task.is-compact .lite-task-title { -webkit-line-clamp: 1; font-size: 11px; line-height: 1.08; }
+    .lite-task.is-compact .lite-task-due, .lite-task.is-compact .lite-task-due.is-overdue { font-size: 8px; }
+    .lite-today-guide { position: absolute; z-index: 0; top: 0; bottom: 0; left: var(--today-x); border-left: 1px dashed #63bfb0; pointer-events: none; }
+    .lite-today-guide span { position: absolute; top: 5px; left: 7px; color: #277d70; font-size: 11px; font-weight: 650; }
+    .lite-settings-label { display: grid; gap: 5px; margin: 14px 0 0; color: #7185a2; font-size: 13px; }
+    .lite-settings-label select { height: 34px; padding: 5px 8px; border: 1px solid #d9e3eb; border-radius: 7px; background: #fff; color: #071f49; }
+    .lite-settings-hint { margin-top: 7px; font-size: 12px; }
+    .lite-history-list p { display: block; overflow: hidden; padding: 9px 0; white-space: nowrap; text-overflow: ellipsis; color: #071f49; font-size: 13px; }
+    .lite-history-list p span { display: inline; color: #7185a2; font-size: inherit; }
     @media (max-width: 780px) {
       .lite-canvas { padding: 5px 9px 12px; }
       .lite-capture-wrap { min-width: 0; }

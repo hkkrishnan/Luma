@@ -7,6 +7,7 @@
   const { parseWorkspaceMarkdown, serializeWorkspaceMarkdown, normalizeWorkspace } =
     window.NorthstarMarkdown;
   const root = document.getElementById("root");
+  const defaultPreferences = { backupName: "date" };
   const state = {
     workspaces: new Map(),
     activeId: null,
@@ -20,6 +21,7 @@
     undo: null,
     notice: "",
     captureImportant: false,
+    preferences: { ...defaultPreferences },
     file: { handle: null, fileName: "northstar.md", revision: null },
     persistTimer: null,
   };
@@ -54,6 +56,39 @@
       }[c]),
     );
   const today = () => new Date().toLocaleDateString("en-CA");
+  const displayDate = (value) => {
+    if (!value) return "Date unavailable";
+    const date = new Date(value);
+    return Number.isNaN(date.getTime())
+      ? "Date unavailable"
+      : date.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+  };
+  const isoWeekCode = (value = new Date()) => {
+    const date = new Date(Date.UTC(value.getFullYear(), value.getMonth(), value.getDate()));
+    const day = date.getUTCDay() || 7;
+    date.setUTCDate(date.getUTCDate() + 4 - day);
+    const year = date.getUTCFullYear();
+    const yearStart = new Date(Date.UTC(year, 0, 1));
+    const week = Math.ceil((((date - yearStart) / 86400000) + 1) / 7);
+    return `WK${String(year).slice(-2)}${String(week).padStart(2, "0")}`;
+  };
+  const backupFilename = () => state.preferences.backupName === "week"
+    ? `northstar-${isoWeekCode()}.md`
+    : `northstar-${today()}.md`;
+  const noteHtml = (value) => esc(value)
+    .replace(/\*\*([^*\n]+)\*\*/g, "<strong>$1</strong>")
+    .replace(/\n/g, "<br>");
+  const noteMarkdown = (editor) => {
+    const text = (node) => {
+      if (node.nodeType === Node.TEXT_NODE) return node.nodeValue || "";
+      if (node.nodeType !== Node.ELEMENT_NODE) return "";
+      if (node.tagName === "BR") return "\n";
+      const contents = [...node.childNodes].map(text).join("");
+      if (node.tagName === "STRONG" || node.tagName === "B") return `**${contents}**`;
+      return node.tagName === "DIV" || node.tagName === "P" ? `${contents}\n` : contents;
+    };
+    return [...editor.childNodes].map(text).join("").replace(/\n{3,}/g, "\n\n").replace(/\n$/, "");
+  };
   const active = () => state.workspaces.get(state.activeId);
   const profiles = () => [...state.workspaces.values()];
   const dirty = (w) => { w.dirty = true; queueLocalSave(); };
@@ -113,6 +148,7 @@
       profiles: profiles().map((profile) => ({ ...profile, handle: null, revision: null })),
       activeId: state.activeId,
       file: state.file,
+      preferences: state.preferences,
       savedAt: new Date().toISOString(),
       snapshots,
     };
@@ -128,6 +164,8 @@
       const record = await localDb.read();
       if (!record?.profiles?.length) return false;
       loadProfiles(record.profiles.map((profile) => normalizeWorkspace(profile)), record.file, record.activeId);
+      state.preferences = { ...defaultPreferences, ...(record.preferences || {}) };
+      if (!["date", "week"].includes(state.preferences.backupName)) state.preferences.backupName = "date";
       state.notice = state.file.handle
         ? `Restored your browser copy. Reconnect ${state.file.fileName} to check the latest Markdown.`
         : "Restored your browser copy. Import or reconnect Markdown when ready.";
@@ -400,7 +438,7 @@
         a.href = URL.createObjectURL(
           new Blob([text], { type: "text/markdown;charset=utf-8" }),
         );
-        a.download = state.file.fileName || "northstar.md";
+        a.download = backupFilename();
         a.click();
         setTimeout(() => URL.revokeObjectURL(a.href), 500);
         profiles().forEach((profile) => profile.dirty = false);
@@ -457,32 +495,54 @@
       icon("settings")
     }Settings</button></div>`;
   }
+  function history(w) {
+    const entries = w.tasks.filter((t) => ["completed", "cancelled", "deleted"].includes(t.status))
+      .map((t) => ({
+        task: t,
+        event: t.status === "completed" ? "Completed" : "Removed",
+        at: t.status === "completed" ? t.completedAt : t.deletedAt || t.updatedAt || t.createdAt,
+      }))
+      .sort((a, b) => new Date(b.at || 0) - new Date(a.at || 0));
+    return `<div class="lite-history" ${state.historyOpen ? "" : "hidden"}><section class="lite-history-card" role="dialog" aria-modal="true"><div class="lite-settings-header"><h2>${esc(w.title)} history</h2><button data-action="close-history" aria-label="Close history">${icon("close")}</button></div><div class="lite-history-list">${entries.map(({ task, event, at }) => `<p title="${esc(task.title)}">${esc(task.title)}<span> · ${event} · ${displayDate(at)}</span></p>`).join("") || "<p>No completed or removed tasks yet.</p>"}</div></section></div>`;
+  }
+  function settingsPanel() {
+    const name = state.preferences.backupName;
+    return `<div class="lite-settings" ${state.settingsOpen ? "" : "hidden"}><section class="lite-settings-card" role="dialog" aria-modal="true"><div class="lite-settings-header"><h2>Settings</h2><button data-action="close-settings" aria-label="Close settings">${icon("close")}</button></div><p>NorthStar Lite saves a private recovery copy in this browser. Save to Markdown when you want to update your file.</p><label class="lite-settings-label">Backup filename<select data-setting="backup-name"><option value="date" ${name === "date" ? "selected" : ""}>Current date</option><option value="week" ${name === "week" ? "selected" : ""}>Week number</option></select></label><p class="lite-settings-hint">Downloads use ${esc(backupFilename())}.</p><button class="lite-reset-layout" data-action="reset-layout">Reset current layout</button></section></div>`;
+  }
   function tasks(w) {
     const q = state.query.trim().toLowerCase();
     const width = Math.min(25, Math.max(16, 210 / Math.max(root.clientWidth, 1) * 100));
+    const stageWidth = root.querySelector(".lite-stage")?.clientWidth || Math.max(1, root.clientWidth - 88);
+    const labelWidth = (x) => Math.max(24, Math.min(154, Math.floor(stageWidth * (100 - x) / 100 - 30)));
     const cards = w.tasks.filter((t) =>
       !["completed", "cancelled", "deleted"].includes(t.status) &&
       (!state.search || `${t.title} ${t.notes} ${(t.tags || []).join(" ")} ${t.project || ""}`.toLowerCase().includes(q))
     ).map((t, i) => ({
       t, i, saved: position(t, i, w),
       band: t.importance === "important" ? "important" : "less-important",
-      lane: 0,
     }));
     const occupied = { important: [], "less-important": [] };
     ["important", "less-important"].forEach((band) => cards
       .filter((card) => card.band === band)
       .sort((a, b) => a.saved.x - b.saved.x || a.i - b.i)
       .forEach((card) => {
-      const lane = occupied[band].findIndex((items) =>
-        !items.some((item) => card.saved.x < item.x + item.width + 1 && item.x < card.saved.x + width + 1),
-      );
-      card.lane = lane === -1 ? occupied[band].length : lane;
-      if (!occupied[band][card.lane]) occupied[band][card.lane] = [];
-      occupied[band][card.lane].push({ x: card.saved.x, width });
+        const lane = occupied[band].findIndex((items) =>
+          !items.some((item) => card.saved.x < item.x + item.width + 1 && item.x < card.saved.x + width + 1),
+        );
+        card.lane = lane === -1 ? occupied[band].length : lane;
+        if (!occupied[band][card.lane]) occupied[band][card.lane] = [];
+        occupied[band][card.lane].push({ x: card.saved.x, width });
       }));
     const laneCount = {
       important: Math.max(1, occupied.important.length),
       "less-important": Math.max(1, occupied["less-important"].length),
+    };
+    const stageHeight = Math.max(1, window.innerHeight - 58);
+    const compactBand = (band) => {
+      const count = laneCount[band];
+      if (count < 2) return false;
+      const availableHeight = (band === "important" ? 35 : 35) / 100 * stageHeight;
+      return availableHeight / (count - 1) < 54;
     };
     const laneY = (band, lane) => {
       const [start, end] = band === "important" ? [5, 40] : [56, 91];
@@ -504,13 +564,12 @@
         });
     });
     return cards.map(({ t, saved, band, lane }) => {
-      // Cards may move vertically into an available lane, never away from their date.
       const p = { x: saved.x, y: laneY(band, lane) };
       const d = due(t.dueDate) || "Later";
       const showDate = dateLeaders.has(t.id);
-      return `<article class="lite-task task-${quadrant(t)}" data-task="${
+      return `<article class="lite-task task-${quadrant(t)}${compactBand(band) ? " is-compact" : ""}" data-task="${
         esc(t.id)
-      }" style="--x:${p.x}%;--y:${p.y}%"><button class="lite-task-dot" data-complete="${
+      }" style="--x:${p.x}%;--y:${p.y}%;--task-label-width:${labelWidth(p.x)}px"><button class="lite-task-dot" data-complete="${
         esc(t.id)
       }" aria-label="Mark ${
         esc(t.title)
@@ -530,9 +589,9 @@
     if (!t) {
       return `<section class="lite-notes"><div class="lite-notes-heading"><span class="notes-glyph">${
         icon("file")
-      }</span>Notes</div><textarea class="lite-notes-input" aria-label="${w.title} notes" placeholder="Write a note…">${
-        esc(w.notes)
-      }</textarea></section>`;
+      }</span>Notes</div><div class="lite-notes-input" contenteditable="true" role="textbox" aria-multiline="true" aria-label="${w.title} notes" data-placeholder="Write a note…">${
+        noteHtml(w.notes)
+      }</div></section>`;
     }
     return `<section class="lite-notes is-editing"><div class="lite-editor-kicker">Task editor</div><input id="task-title" class="lite-editor-title" aria-label="Task title" value="${
       esc(t.title)
@@ -542,9 +601,9 @@
       t.importance === "important" ? "selected" : ""
     }>Important</option>${urgencyFor(t.dueDate) === "urgent" ? `<option value="less-important" ${
       t.importance !== "important" ? "selected" : ""
-    }>Not important</option>` : ""}</select></label><label class="lite-editor-label">Notes<textarea id="task-notes" class="lite-editor-notes">${
-      esc(t.notes || "")
-    }</textarea></label><div class="lite-editor-actions"><button class="lite-editor-save" data-action="save-task">Save changes</button><button class="lite-editor-delete" data-action="delete-task">Delete task</button></div></section>`;
+    }>Not important</option>` : ""}</select></label><label class="lite-editor-label lite-editor-notes-label">Notes<div id="task-notes" class="lite-editor-notes" contenteditable="true" role="textbox" aria-multiline="true" data-placeholder="Write a note…">${
+      noteHtml(t.notes || "")
+    }</div></label><div class="lite-editor-actions"><button class="lite-editor-save" data-action="save-task">Save changes</button><button class="lite-editor-delete" data-action="delete-task">Delete task</button></div></section>`;
   }
   function welcome() {
     root.innerHTML = `<main class="lite-welcome"><div class="welcome-mark">${
@@ -593,15 +652,11 @@
         icon("more")
       }</button>${
         menu(w)
-      }</div></div></header><section class="lite-stage lite-three-quadrant" aria-label="Three-area priority canvas"><div class="lite-axis lite-axis-y"><span class="axis-label axis-important">Important</span><span class="axis-label axis-not-important">Not Important</span></div><div class="lite-axis lite-axis-x"><span class="axis-label">Not Urgent</span><div class="timeline">${timeline(w).map((tick) => `<span class="${tick.showLabel ? "" : "is-label-hidden"}" style="--tick-x:${tick.x}%" title="${esc(tick.label)}">${esc(tick.label)}</span>`).join("")}</div><span class="axis-label">Urgent</span></div><div class="lite-task-layer">${
+      }</div></div></header><section class="lite-stage lite-three-quadrant" aria-label="Three-area priority canvas"><div class="lite-today-guide" style="--today-x:${timelineX(0)}%" aria-hidden="true"><span>Today</span></div><div class="lite-axis lite-axis-y"><span class="axis-label axis-important">Important</span><span class="axis-label axis-not-important">Not Important</span></div><div class="lite-axis lite-axis-x"><span class="axis-label">Not Urgent</span><div class="timeline">${timeline(w).map((tick) => `<span class="${tick.showLabel ? "" : "is-label-hidden"}" style="--tick-x:${tick.x}%" title="${esc(tick.label)}">${esc(tick.label)}</span>`).join("")}</div><span class="axis-label">Urgent</span></div><div class="lite-task-layer">${
         tasks(w)
       }</div>${panel(w)}</section><p class="lite-toast" role="status">${
         esc(state.notice)
-      }</p><div class="lite-history" ${state.historyOpen ? "" : "hidden"}><section class="lite-history-card" role="dialog" aria-modal="true"><div class="lite-settings-header"><h2>${w.title} history</h2><button data-action="close-history" aria-label="Close history">${icon("close")}</button></div><div class="lite-history-list">${w.tasks.filter((t) => ["completed", "cancelled", "deleted"].includes(t.status)).map((t) => `<p><strong>${esc(t.title)}</strong><span>${esc(t.status)}</span></p>`).join("") || "<p>No completed or cancelled tasks yet.</p>"}</div></section></div><div class="lite-conflict" ${state.conflict ? "" : "hidden"}><section class="lite-settings-card" role="dialog" aria-modal="true"><div class="lite-settings-header"><h2>File changed outside NorthStar</h2></div><p>Reload the selected file, or download your current in-memory changes. Nothing has been overwritten.</p><div class="lite-editor-actions"><button class="lite-editor-delete" data-action="conflict-download">Download current changes</button><button class="lite-editor-save" data-action="conflict-reload">Reload file</button></div></section></div><div class="lite-settings" ${
-        state.settingsOpen ? "" : "hidden"
-      }><section class="lite-settings-card" role="dialog" aria-modal="true"><div class="lite-settings-header"><h2>Settings</h2><button data-action="close-settings" aria-label="Close settings">${
-        icon("close")
-      }</button></div><p>NorthStar Lite saves a private recovery copy in this browser. Save to Markdown when you want to update your file.</p><button class="lite-reset-layout" data-action="reset-layout">Reset current layout</button></section></div></main>`;
+      }</p>${history(w)}<div class="lite-conflict" ${state.conflict ? "" : "hidden"}><section class="lite-settings-card" role="dialog" aria-modal="true"><div class="lite-settings-header"><h2>File changed outside NorthStar</h2></div><p>Reload the selected file, or download your current in-memory changes. Nothing has been overwritten.</p><div class="lite-editor-actions"><button class="lite-editor-delete" data-action="conflict-download">Download current changes</button><button class="lite-editor-save" data-action="conflict-reload">Reload file</button></div></section></div>${settingsPanel()}</main>`;
     const notImportantLabel = root.querySelector(".axis-not-important");
     if (notImportantLabel) notImportantLabel.innerHTML = "<span>Not</span><span>Important</span>";
     bind();
@@ -703,10 +758,34 @@
         }
       });
     }
-    root.querySelector(".lite-notes-input")?.addEventListener("input", (e) => {
-      active().notes = e.target.value;
+    const bindNoteEditor = (editor, onChange) => {
+      if (!editor) return;
+      const sync = () => onChange(noteMarkdown(editor));
+      editor.addEventListener("input", sync);
+      editor.addEventListener("keydown", (e) => {
+        if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "b") {
+          e.preventDefault();
+          const selection = window.getSelection();
+          const range = selection?.rangeCount ? selection.getRangeAt(0) : null;
+          if (range && !range.collapsed && editor.contains(range.commonAncestorContainer)) {
+            const strong = document.createElement("strong");
+            strong.append(range.extractContents());
+            range.insertNode(strong);
+            range.selectNodeContents(strong);
+            selection.removeAllRanges();
+            selection.addRange(range);
+          } else {
+            document.execCommand("bold");
+          }
+          sync();
+        }
+      });
+    };
+    bindNoteEditor(root.querySelector(".lite-notes-input"), (value) => {
+      active().notes = value;
       dirty(active());
     });
+    bindNoteEditor(root.querySelector("#task-notes"), () => {});
     root.querySelectorAll("[data-workspace]").forEach((b) =>
       b.onclick = () => {
         state.activeId = b.dataset.workspace;
@@ -817,13 +896,18 @@
             dueDate: root.querySelector("#task-due").value || null,
             importance: root.querySelector("#task-importance").value,
             urgency: urgencyFor(root.querySelector("#task-due").value || null),
-            notes: root.querySelector("#task-notes").value,
+            notes: noteMarkdown(root.querySelector("#task-notes")),
           });
           state.selectedId = null;
           render();
         }
       }
     );
+    root.querySelector("[data-setting=\"backup-name\"]")?.addEventListener("change", (e) => {
+      state.preferences.backupName = e.target.value === "week" ? "week" : "date";
+      queueLocalSave();
+      render();
+    });
     root.querySelector(".lite-stage")?.addEventListener("click", (e) => {
       if (e.target.classList.contains("lite-stage")) {
         state.selectedId = null;
