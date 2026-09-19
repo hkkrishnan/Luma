@@ -75,7 +75,7 @@ test("one Markdown workspace preserves profiles and aligns same-date tasks", asy
   const path = await download.path();
   expect(path).toBeTruthy();
   const saved = fs.readFileSync(path, "utf8");
-  expect(saved).toContain("type: northstar-workspace");
+  expect(saved).toContain("type: luma-workspace");
   expect(saved).toContain("## Profile: Personal");
   expect(saved).toContain("## Profile: Work");
 

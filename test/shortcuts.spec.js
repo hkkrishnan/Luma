@@ -194,12 +194,12 @@ test("today guide, dated history, Markdown notes, and named backups work togethe
   await page.getByRole("button", { name: "Open workspace menu" }).click();
   await page.getByRole("button", { name: "Settings" }).click();
   await page.locator("[data-setting='backup-name']").selectOption("week");
-  await expect(page.locator(".lite-settings-hint")).toContainText(/northstar-WK\d{4}\.md/);
+  await expect(page.locator(".lite-settings-hint")).toContainText(/luma-WK\d{4}\.md/);
   await page.getByRole("button", { name: "Close settings" }).click();
   const downloadPromise = page.waitForEvent("download");
   await page.getByLabel("Save current Markdown workspace").click();
   const download = await downloadPromise;
-  await expect(download.suggestedFilename()).toMatch(/^northstar-WK\d{4}\.md$/);
+  await expect(download.suggestedFilename()).toMatch(/^luma-WK\d{4}\.md$/);
   expect(fs.readFileSync(await download.path(), "utf8")).toContain('notes: "**Bold note**"');
 });
 

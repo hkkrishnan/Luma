@@ -1,10 +1,10 @@
 ---
-type: northstar-workspace
+type: luma-workspace
 version: 1
-title: NorthStar Work Import
+title: Luma Work Import
 ---
 
-# NorthStar Work Import
+# Luma Work Import
 
 ## Profile: Personal
 

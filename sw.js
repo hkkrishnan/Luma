@@ -1,8 +1,8 @@
-const CACHE = "northstar-lite-shell-v61";
+const CACHE = "luma-shell-v1";
 const SHELL = [
-  "./", "./index.html", "./app.js", "./northstar-markdown.js",
+  "./", "./index.html", "./app.js", "./luma-markdown.js",
   "./lite-enhancements.css", "./manifest.webmanifest",
-  "./icons/northstar-192.svg", "./icons/northstar-512.svg",
+  "./icons/luma-192.svg", "./icons/luma-512.svg",
 ];
 
 self.addEventListener("install", (event) => {

@@ -5,7 +5,7 @@
     window.addEventListener("load", () => navigator.serviceWorker.register("./sw.js").catch(() => {}));
   }
   const { parseWorkspaceMarkdown, serializeWorkspaceMarkdown, normalizeWorkspace } =
-    window.NorthstarMarkdown;
+    window.LumaMarkdown || window.NorthstarMarkdown;
   const root = document.getElementById("root");
   const defaultPreferences = { backupName: "date" };
   const state = {
@@ -22,7 +22,7 @@
     notice: "",
     captureImportant: false,
     preferences: { ...defaultPreferences },
-    file: { handle: null, fileName: "northstar.md", revision: null },
+    file: { handle: null, fileName: "luma.md", revision: null },
     persistTimer: null,
   };
   const icon = (name) =>
@@ -73,8 +73,8 @@
     return `WK${String(year).slice(-2)}${String(week).padStart(2, "0")}`;
   };
   const backupFilename = () => state.preferences.backupName === "week"
-    ? `northstar-${isoWeekCode()}.md`
-    : `northstar-${today()}.md`;
+    ? `luma-${isoWeekCode()}.md`
+    : `luma-${today()}.md`;
   const noteHtml = (value) => esc(value)
     .replace(/\*\*([^*\n]+)\*\*/g, "<strong>$1</strong>")
     .replace(/\n/g, "<br>");
@@ -100,36 +100,50 @@
     return `${text.length}:${text.slice(0, 64)}:${text.slice(-64)}`;
   };
   const localDb = (() => {
-    const open = () => new Promise((resolve, reject) => {
+    const DATABASE = "luma";
+    const LEGACY_DATABASE = "northstar-lite";
+    const open = (name) => new Promise((resolve, reject) => {
       if (!window.indexedDB) return reject(new Error("IndexedDB is unavailable."));
-      const request = indexedDB.open("northstar-lite", 1);
+      const request = indexedDB.open(name, 1);
       request.onupgradeneeded = () => request.result.createObjectStore("workspace");
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error);
     });
-    const read = async () => {
-      const db = await open();
+    const readFrom = async (name) => {
+      const db = await open(name);
       return new Promise((resolve, reject) => {
         const request = db.transaction("workspace").objectStore("workspace").get("current");
         request.onsuccess = () => resolve(request.result || null);
         request.onerror = () => reject(request.error);
       });
     };
-    const write = async (value) => {
-      const db = await open();
+    const writeTo = async (name, value) => {
+      const db = await open(name);
       return new Promise((resolve, reject) => {
         const request = db.transaction("workspace", "readwrite").objectStore("workspace").put(value, "current");
         request.onsuccess = () => resolve();
         request.onerror = () => reject(request.error);
       });
     };
-    const clear = async () => {
-      const db = await open();
+    const clearFrom = async (name) => {
+      const db = await open(name);
       return new Promise((resolve, reject) => {
         const request = db.transaction("workspace", "readwrite").objectStore("workspace").delete("current");
         request.onsuccess = () => resolve();
         request.onerror = () => reject(request.error);
       });
+    };
+    const read = async () => {
+      const current = await readFrom(DATABASE);
+      if (current) return current;
+      const legacy = await readFrom(LEGACY_DATABASE);
+      if (legacy) await writeTo(DATABASE, legacy);
+      return legacy;
+    };
+    const write = (value) => writeTo(DATABASE, value);
+    const clear = async () => {
+      await clearFrom(DATABASE);
+      await clearFrom(LEGACY_DATABASE);
     };
     return { read, write, clear };
   })();
@@ -180,7 +194,7 @@
       title: id === "work" ? "Work" : "Personal",
       tasks: [],
       notes: "",
-      fileName: "northstar.md",
+      fileName: "luma.md",
     });
   function addWorkspace(w) {
     const id = /work/i.test(`${w.id} ${w.title}`) ? "work" : "personal";
@@ -204,7 +218,7 @@
     });
     if (!state.workspaces.has("personal")) state.workspaces.set("personal", blank("personal"));
     if (!state.workspaces.has("work")) state.workspaces.set("work", blank("work"));
-    state.file = { handle: file?.handle || null, fileName: file?.fileName || "northstar.md", revision: file?.revision || null };
+    state.file = { handle: file?.handle || null, fileName: file?.fileName || "luma.md", revision: file?.revision || null };
     profiles().forEach((profile) => { profile.fileName = state.file.fileName; profile.handle = state.file.handle; profile.revision = state.file.revision; });
     state.activeId = sourceIds.includes(activeId)
       ? activeId
@@ -367,9 +381,9 @@
     try {
       const text = await file.text();
       const parsed = parseWorkspaceMarkdown(text, file.name);
-      loadProfiles(parsed.profiles, { handle, fileName: file.name || "northstar.md", revision: await hash(text) }, state.activeId || "work");
+      loadProfiles(parsed.profiles, { handle, fileName: file.name || "luma.md", revision: await hash(text) }, state.activeId || "work");
       state.selectedId = null;
-      state.notice = parsed.warnings.join(" ") || "Opened one NorthStar workspace file.";
+      state.notice = parsed.warnings.join(" ") || "Opened one Luma workspace file.";
       queueLocalSave();
       render();
     } catch (e) {
@@ -421,7 +435,7 @@
         const external = await before.text();
         if (state.file.revision && await hash(external) !== state.file.revision) {
           state.conflict = { text: external, name: before.name || state.file.fileName };
-          state.notice = "The Markdown file changed outside NorthStar. Choose Reload file or Download current changes.";
+          state.notice = "The Markdown file changed outside Luma. Choose Reload file or Download current changes.";
           render();
           return;
         }
@@ -457,7 +471,7 @@
     dirty(active());
   }
   async function clearBrowserWorkspace() {
-    if (!window.confirm("Clear this browser's NorthStar workspace? This removes only the local recovery copy. Your Markdown file will not be changed.")) {
+    if (!window.confirm("Clear this browser's Luma workspace? This removes only the local recovery copy. Your Markdown file will not be changed.")) {
       return;
     }
     try {
@@ -468,8 +482,8 @@
       state.selectedId = null;
       state.undo = null;
       state.menuOpen = false;
-      state.file = { handle: null, fileName: "northstar.md", revision: null };
-      state.notice = "Cleared this browser's NorthStar workspace. Your Markdown files were not changed.";
+      state.file = { handle: null, fileName: "luma.md", revision: null };
+      state.notice = "Cleared this browser's Luma workspace. Your Markdown files were not changed.";
       render();
     } catch (e) {
       notice(`Could not clear this browser workspace: ${e.message}`);
@@ -507,7 +521,7 @@
   }
   function settingsPanel() {
     const name = state.preferences.backupName;
-    return `<div class="lite-settings" ${state.settingsOpen ? "" : "hidden"}><section class="lite-settings-card" role="dialog" aria-modal="true"><div class="lite-settings-header"><h2>Settings</h2><button data-action="close-settings" aria-label="Close settings">${icon("close")}</button></div><p>NorthStar Lite saves a private recovery copy in this browser. Save to Markdown when you want to update your file.</p><label class="lite-settings-label">Backup filename<select data-setting="backup-name"><option value="date" ${name === "date" ? "selected" : ""}>Current date</option><option value="week" ${name === "week" ? "selected" : ""}>Week number</option></select></label><p class="lite-settings-hint">Downloads use ${esc(backupFilename())}.</p><button class="lite-reset-layout" data-action="reset-layout">Reset current layout</button></section></div>`;
+    return `<div class="lite-settings" ${state.settingsOpen ? "" : "hidden"}><section class="lite-settings-card" role="dialog" aria-modal="true"><div class="lite-settings-header"><h2>Settings</h2><button data-action="close-settings" aria-label="Close settings">${icon("close")}</button></div><p>Luma saves a private recovery copy in this browser. Save to Markdown when you want to update your file.</p><label class="lite-settings-label">Backup filename<select data-setting="backup-name"><option value="date" ${name === "date" ? "selected" : ""}>Current date</option><option value="week" ${name === "week" ? "selected" : ""}>Week number</option></select></label><p class="lite-settings-hint">Downloads use ${esc(backupFilename())}.</p><button class="lite-reset-layout" data-action="reset-layout">Reset current layout</button></section></div>`;
   }
   function tasks(w) {
     const q = state.query.trim().toLowerCase();
@@ -608,7 +622,7 @@
   function welcome() {
     root.innerHTML = `<main class="lite-welcome"><div class="welcome-mark">${
       icon("file")
-    }</div><h1>Open your NorthStar Markdown</h1><p>Your tasks and notes stay in this tab only. The website does not store or upload them.</p><label class="lite-file-action" for="markdown-file">${
+    }</div><h1>Open your Luma Markdown</h1><p>Your tasks and notes stay in this tab only. The website does not store or upload them.</p><label class="lite-file-action" for="markdown-file">${
       icon("upload")
     }Choose Markdown file</label>${
       window.showOpenFilePicker
@@ -656,7 +670,7 @@
         tasks(w)
       }</div>${panel(w)}</section><p class="lite-toast" role="status">${
         esc(state.notice)
-      }</p>${history(w)}<div class="lite-conflict" ${state.conflict ? "" : "hidden"}><section class="lite-settings-card" role="dialog" aria-modal="true"><div class="lite-settings-header"><h2>File changed outside NorthStar</h2></div><p>Reload the selected file, or download your current in-memory changes. Nothing has been overwritten.</p><div class="lite-editor-actions"><button class="lite-editor-delete" data-action="conflict-download">Download current changes</button><button class="lite-editor-save" data-action="conflict-reload">Reload file</button></div></section></div>${settingsPanel()}</main>`;
+      }</p>${history(w)}<div class="lite-conflict" ${state.conflict ? "" : "hidden"}><section class="lite-settings-card" role="dialog" aria-modal="true"><div class="lite-settings-header"><h2>File changed outside Luma</h2></div><p>Reload the selected file, or download your current in-memory changes. Nothing has been overwritten.</p><div class="lite-editor-actions"><button class="lite-editor-delete" data-action="conflict-download">Download current changes</button><button class="lite-editor-save" data-action="conflict-reload">Reload file</button></div></section></div>${settingsPanel()}</main>`;
     const notImportantLabel = root.querySelector(".axis-not-important");
     if (notImportantLabel) notImportantLabel.innerHTML = "<span>Not</span><span>Important</span>";
     bind();

@@ -1,4 +1,4 @@
-/* Dependency-free Markdown/YAML subset for NorthStar Lite profile files. */
+/* Dependency-free Markdown/YAML subset for Luma profile files. */
 (function (global) {
   "use strict";
   const ACTIVE_STATUSES = new Set(["inbox", "open", "in-progress", "waiting"]);
@@ -93,11 +93,11 @@
       handle: workspace.handle || null, revision: workspace.revision || null, dirty: Boolean(workspace.dirty), warnings, frontmatter: workspace.frontmatter || {},
     };
   }
-  function parseMarkdown(text, fileName = "northstar.md") {
+  function parseMarkdown(text, fileName = "luma.md") {
     const warnings = [], meta = frontmatter(text);
     const title = meta.title || (/^work(?:\.|$)/i.test(fileName) ? "Work" : "Personal");
     const workspace = normalizeWorkspace({ id: meta.id || title, title, tasks: parseTasks(section("Tasks", text)), notes: section("Notes", text), fileName, frontmatter: meta }, warnings);
-    if (meta.type && meta.type !== "northstar-profile" && meta.type !== "cluster-profile") warnings.push("This file does not declare a NorthStar profile type.");
+    if (meta.type && !["luma-profile", "northstar-profile", "cluster-profile"].includes(meta.type)) warnings.push("This file does not declare a Luma profile type.");
     return workspace;
   }
   function line(key, value, indent = "  ") {
@@ -122,17 +122,17 @@
     }).join("\n");
     const meta = Object.entries(w.frontmatter || {}).filter(([key]) => !["type", "version", "id", "title"].includes(key) && /^[A-Za-z][\w-]*$/.test(key));
     return [
-      "---", "type: northstar-profile", "version: 1", `id: ${quote(w.id)}`, `title: ${quote(w.title)}`,
+      "---", "type: luma-profile", "version: 1", `id: ${quote(w.id)}`, `title: ${quote(w.title)}`,
       ...meta.map(([key, value]) => `${key}: ${typeof value === "string" ? quote(value) : JSON.stringify(value)}`),
       "---", "", `# ${w.title}`, "", "## Tasks", "", "```yaml", tasks || "[]", "```", "", "## Notes", "", "```text", w.notes, "```", "",
     ].join("\n");
   }
   const subSection = (name, text) => new RegExp(`^###\\s+${name}\\s*\\n\\s*(?:\`\`\`(?:yaml|text)?\\n)?([\\s\\S]*?)(?:\\n\`\`\`|(?=^###\\s)|(?![\\s\\S]))`, "im").exec(text)?.[1]?.replace(/\n$/, "") ?? "";
-  function parseWorkspaceMarkdown(text, fileName = "northstar.md") {
+  function parseWorkspaceMarkdown(text, fileName = "luma.md") {
     const meta = frontmatter(text), warnings = [];
-    if (meta.type !== "northstar-workspace") {
+    if (!["luma-workspace", "northstar-workspace"].includes(meta.type)) {
       const legacy = parseMarkdown(text, fileName);
-      warnings.push("Imported a legacy single-profile file. Save it to migrate to one NorthStar workspace file.");
+      warnings.push("Imported a legacy single-profile file. Save it to migrate to one Luma workspace file.");
       return { profiles: [legacy], warnings, legacy: true };
     }
     const profiles = [];
@@ -152,9 +152,11 @@
       const source = serializeMarkdown(profile);
       return `## Profile: ${profile.title}\n\n### Tasks\n\n\`\`\`yaml\n${section("Tasks", source) || "[]"}\n\`\`\`\n\n### Notes\n\n\`\`\`text\n${section("Notes", source)}\n\`\`\``;
     });
-    return ["---", "type: northstar-workspace", "version: 1", "title: NorthStar", "---", "", "# NorthStar", "", ...contents, ""].join("\n");
+    return ["---", "type: luma-workspace", "version: 1", "title: Luma", "---", "", "# Luma", "", ...contents, ""].join("\n");
   }
   const api = { ACTIVE_STATUSES, CLOSED_STATUSES, isIsoDate, urgencyFor, parseMarkdown, serializeMarkdown, parseWorkspaceMarkdown, serializeWorkspaceMarkdown, normalizeWorkspace, normalizeTask, localDate };
+  global.LumaMarkdown = api;
+  // Compatibility for pages already open before the rename.
   global.NorthstarMarkdown = api;
   if (typeof module !== "undefined") module.exports = api;
 })(typeof window !== "undefined" ? window : globalThis);
