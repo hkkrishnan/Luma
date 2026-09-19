@@ -7,7 +7,7 @@
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self'; img-src 'self' blob: data:; style-src 'self' 'unsafe-inline'; script-src 'self'; worker-src 'self' blob:"/>
   <title>NorthStar Lite</title>
   <script src="./northstar-markdown.js?v=2" defer></script>
-  <script src="./app.js?v=40" defer></script>
+  <script src="./app.js?v=41" defer></script>
   <link rel="stylesheet" href="./lite-enhancements.css?v=28">
   <style>
     .lite-menu-item .lite-icon { flex: 0 0 19px; align-self: center; }
@@ -42,6 +42,11 @@
     .lite-axis-x .axis-label:last-child { margin-right: 32px; }
     .lite-axis-x::after { right: 35px; }
     .lite-notes-input { background: transparent; }
+    /* Workspace notes blend into the lower-left quadrant and scale with it. */
+    .lite-notes:not(.is-editing) { top: 51%; right: auto; bottom: 4%; left: 1%; width: calc(50% - 24px); height: auto; min-height: 0; padding: 10px 16px; border: 1px solid rgba(169, 189, 207, .38); border-radius: 12px; background: rgba(255, 255, 255, .10); box-shadow: none; }
+    .lite-notes:not(.is-editing) .lite-notes-heading { font-size: 15px; }
+    .lite-notes:not(.is-editing) .notes-glyph .lite-icon { width: 20px; height: 20px; }
+    .lite-notes:not(.is-editing) .lite-notes-input { height: calc(100% - 32px); margin-top: 8px; padding: 0 6px 0 26px; }
     .lite-notes.is-editing { height: min(360px, 42vh); min-height: 300px; bottom: 6%; padding: 18px 20px; }
     .lite-editor-kicker { margin-bottom: 6px; font-size: 12px; }
     .lite-editor-title { padding-bottom: 7px; font-size: 16px; }

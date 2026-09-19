@@ -768,12 +768,34 @@
           const selection = window.getSelection();
           const range = selection?.rangeCount ? selection.getRangeAt(0) : null;
           if (range && !range.collapsed && editor.contains(range.commonAncestorContainer)) {
-            const strong = document.createElement("strong");
-            strong.append(range.extractContents());
-            range.insertNode(strong);
-            range.selectNodeContents(strong);
-            selection.removeAllRanges();
-            selection.addRange(range);
+            const boldParent = (node) => {
+              const element = node.nodeType === Node.ELEMENT_NODE ? node : node.parentElement;
+              return element?.closest("strong, b");
+            };
+            const startBold = boldParent(range.startContainer);
+            const endBold = boldParent(range.endContainer);
+            const selectsWholeBold = startBold && startBold === endBold &&
+              range.startContainer === startBold && range.startOffset === 0 &&
+              range.endContainer === startBold && range.endOffset === startBold.childNodes.length;
+            if (selectsWholeBold) {
+              const children = [...startBold.childNodes];
+              children.forEach((child) => startBold.parentNode.insertBefore(child, startBold));
+              startBold.remove();
+              const nextRange = document.createRange();
+              nextRange.setStartBefore(children[0]);
+              nextRange.setEndAfter(children[children.length - 1]);
+              selection.removeAllRanges();
+              selection.addRange(nextRange);
+            } else if (startBold && startBold === endBold) {
+              document.execCommand("bold");
+            } else {
+              const strong = document.createElement("strong");
+              strong.append(range.extractContents());
+              range.insertNode(strong);
+              range.selectNodeContents(strong);
+              selection.removeAllRanges();
+              selection.addRange(range);
+            }
           } else {
             document.execCommand("bold");
           }

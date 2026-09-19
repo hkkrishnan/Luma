@@ -5,6 +5,15 @@ test("an undated task groups at the Later marker without gaining a due date", as
   await page.goto("/");
   await page.getByRole("button", { name: "Start a new Markdown file" }).click();
   await expect(page.locator(".axis-important")).toHaveText("Important");
+  await expect(page.locator(".lite-notes")).toHaveCSS("border-top-width", "1px");
+  const [notesBox, stageBox] = await Promise.all([
+    page.locator(".lite-notes").boundingBox(),
+    page.locator(".lite-stage").boundingBox(),
+  ]);
+  expect(notesBox.width).toBeLessThan(stageBox.width / 2);
+  expect(notesBox.x + notesBox.width).toBeLessThan(stageBox.x + stageBox.width / 2);
+  const horizontalAxis = await page.locator(".lite-axis-x").boundingBox();
+  expect(notesBox.y - horizontalAxis.y).toBeLessThanOrEqual(stageBox.height * 0.08 + 2);
   await expect(page.locator(".axis-not-important span")).toHaveText(["Not", "Important"]);
   const [axis, not, important] = await Promise.all([
     page.locator(".lite-axis-y").boundingBox(),
@@ -169,6 +178,10 @@ test("today guide, dated history, Markdown notes, and named backups work togethe
   });
   await page.keyboard.press("Control+b");
   await expect(notes).toContainText("Bold note");
+  expect(await notes.evaluate((element) => element.innerHTML)).toMatch(/<(strong|b)>Bold note<\/(strong|b)>/);
+  await page.keyboard.press("Control+b");
+  expect(await notes.evaluate((element) => element.innerHTML)).not.toMatch(/<(strong|b)>Bold note<\/(strong|b)>/);
+  await page.keyboard.press("Control+b");
   expect(await notes.evaluate((element) => element.innerHTML)).toMatch(/<(strong|b)>Bold note<\/(strong|b)>/);
   await page.getByRole("button", { name: "Save changes" }).click();
 
