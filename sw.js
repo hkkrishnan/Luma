@@ -2,7 +2,7 @@
 const CACHE = "luma-shell-v2";
 const SHELL = [
   "./", "./index.html", "./app.js", "./luma-markdown.js",
-  "./lite-enhancements.css", "./manifest.webmanifest",
+  "./lite-enhancements.css", "./task-editor.css", "./manifest.webmanifest",
   "./icons/luma-192.svg", "./icons/luma-512.svg",
 ];
 

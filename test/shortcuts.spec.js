@@ -166,6 +166,18 @@ test("today guide, dated history, Markdown notes, and named backups work togethe
   await page.keyboard.type("Review full task title");
   await page.keyboard.press("Enter");
   await page.getByText("Review full task title", { exact: true }).click();
+  await expect(page.locator(".lite-notes.is-editing")).toBeVisible();
+  const [editor, stage, xAxis, yAxis] = await Promise.all([
+    page.locator(".lite-notes.is-editing").boundingBox(),
+    page.locator(".lite-stage").boundingBox(),
+    page.locator(".lite-axis-x").boundingBox(),
+    page.locator(".lite-axis-y").boundingBox(),
+  ]);
+  expect(editor.x).toBeGreaterThanOrEqual(stage.x - 1);
+  expect(editor.x + editor.width).toBeLessThanOrEqual(yAxis.x + 1);
+  expect(editor.y).toBeGreaterThanOrEqual(xAxis.y + 8);
+  expect(editor.y + editor.height).toBeLessThanOrEqual(stage.y + stage.height + 1);
+  await page.getByRole("button", { name: "+ Add note" }).click();
   const notes = page.locator("#task-notes");
   await notes.click();
   await page.keyboard.type("Bold note");

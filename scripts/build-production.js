@@ -9,6 +9,7 @@ const RUNTIME_ASSETS = Object.freeze([
   "app.js",
   "luma-markdown.js",
   "lite-enhancements.css",
+  "task-editor.css",
   "manifest.webmanifest",
   "sw.js",
   "icons/luma-192.svg",

@@ -19,6 +19,7 @@
     settingsOpen: false,
     historyOpen: false,
     conflict: null,
+    editorNotesExpanded: null,
     undo: null,
     notice: "",
     captureImportant: false,
@@ -611,17 +612,16 @@
         noteHtml(w.notes)
       }</div></section>`;
     }
-    return `<section class="lite-notes is-editing"><div class="lite-editor-kicker">Task editor</div><input id="task-title" class="lite-editor-title" aria-label="Task title" value="${
+    const notesExpanded = state.editorNotesExpanded ?? Boolean(t.notes);
+    return `<section class="lite-notes is-editing"><div class="lite-editor-grid"><label class="lite-editor-title-label"><span>Task editor</span><input id="task-title" class="lite-editor-title" aria-label="Task title" value="${
       esc(t.title)
-    }"><label class="lite-editor-label">Due date<input id="task-due" class="lite-editor-field" type="date" value="${
+    }"></label><label class="lite-editor-label">Due date<input id="task-due" class="lite-editor-field" type="date" value="${
       esc(t.dueDate || "")
     }"></label><label class="lite-editor-label">Importance<select id="task-importance" class="lite-editor-field"><option value="important" ${
       t.importance === "important" ? "selected" : ""
     }>Important</option>${urgencyFor(t.dueDate) === "urgent" ? `<option value="less-important" ${
       t.importance !== "important" ? "selected" : ""
-    }>Not important</option>` : ""}</select></label><label class="lite-editor-label lite-editor-notes-label">Notes<div id="task-notes" class="lite-editor-notes" contenteditable="true" role="textbox" aria-multiline="true" data-placeholder="Write a note…">${
-      noteHtml(t.notes || "")
-    }</div></label><div class="lite-editor-actions"><button class="lite-editor-save" data-action="save-task">Save changes</button><button class="lite-editor-delete" data-action="delete-task">Delete task</button></div></section>`;
+    }>Not important</option>` : ""}</select></label></div><div class="lite-editor-notes-row"><span>Notes</span><button class="lite-editor-notes-toggle" data-action="toggle-task-notes" aria-expanded="${notesExpanded}">${notesExpanded ? "− Hide note" : "+ Add note"}</button></div>${notesExpanded ? `<div id="task-notes" class="lite-editor-notes" contenteditable="true" role="textbox" aria-multiline="true" data-placeholder="Write a note…">${noteHtml(t.notes || "")}</div>` : ""}<div class="lite-editor-actions"><button class="lite-editor-save" data-action="save-task">Save changes</button><button class="lite-editor-delete" data-action="delete-task">Delete task</button></div></section>`;
   }
   function welcome() {
     root.innerHTML = `<main class="lite-welcome"><div class="welcome-mark">${
@@ -839,6 +839,7 @@
     root.querySelectorAll("[data-select]").forEach((b) =>
       b.onclick = () => {
         state.selectedId = b.dataset.select;
+        state.editorNotesExpanded = null;
         render();
       }
     );
@@ -908,6 +909,10 @@
           dirty(active());
           state.settingsOpen = false;
           render();
+        } else if (a === "toggle-task-notes") {
+          state.editorNotesExpanded = !state.editorNotesExpanded;
+          render();
+          if (state.editorNotesExpanded) root.querySelector("#task-notes")?.focus();
         } else if (a === "undo") {
           const t = active().tasks.find((x) => x.id === state.undo.taskId);
           if (t) {
@@ -936,9 +941,10 @@
             dueDate: root.querySelector("#task-due").value || null,
             importance: root.querySelector("#task-importance").value,
             urgency: urgencyFor(root.querySelector("#task-due").value || null),
-            notes: noteMarkdown(root.querySelector("#task-notes")),
+            notes: root.querySelector("#task-notes") ? noteMarkdown(root.querySelector("#task-notes")) : t.notes,
           });
           state.selectedId = null;
+          state.editorNotesExpanded = null;
           render();
         }
       }

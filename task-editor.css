@@ -1,0 +1,13 @@
+/* Compact, expandable task notes: the writing area appears only when it is useful. */
+.lite-notes.is-editing{top:51%;right:auto;bottom:auto;left:1%;width:calc(50% - 24px);max-width:none;height:auto;max-height:calc(49% - 34px);min-height:0;padding:14px 18px;overflow:auto}
+.lite-editor-grid{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(92px,.72fr) minmax(92px,.72fr);gap:10px;align-items:end}
+.lite-editor-title-label,.lite-editor-label{display:grid;gap:4px;margin:0;color:#758aa4;font-size:11px}
+.lite-editor-title{height:30px;padding:0;border:0;border-bottom:1px solid #d8e2ea;font-size:15px}
+.lite-editor-field{height:30px}
+.lite-editor-notes-row{display:flex;align-items:center;gap:12px;min-height:33px;margin-top:9px;border-bottom:1px solid #d8e2ea;color:#758aa4;font-size:11px}
+.lite-editor-notes-toggle{padding:0;border:0;background:transparent;color:#7a92b2;font-size:12px;cursor:pointer}
+.lite-editor-notes-toggle:hover{text-decoration:underline}
+.lite-editor-notes{width:100%;height:88px;min-height:56px;margin-top:8px;padding:7px;border:1px solid #d9e3eb;border-radius:7px;background:rgba(255,255,255,.74);line-height:1.35}
+.lite-editor-actions{margin-top:9px}
+@media(max-width:780px){.lite-notes.is-editing{width:calc(50% - 18px)}.lite-editor-grid{grid-template-columns:1fr 1fr}.lite-editor-title-label{grid-column:1/-1}}
+@media(max-width:430px){.lite-editor-grid{grid-template-columns:1fr}.lite-editor-title-label{grid-column:auto}}
