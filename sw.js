@@ -1,4 +1,5 @@
-const CACHE = "luma-shell-v1";
+// Only public application-shell assets are cached. Workspace content never enters this cache.
+const CACHE = "luma-shell-v2";
 const SHELL = [
   "./", "./index.html", "./app.js", "./luma-markdown.js",
   "./lite-enhancements.css", "./manifest.webmanifest",

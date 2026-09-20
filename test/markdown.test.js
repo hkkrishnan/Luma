@@ -1,5 +1,5 @@
 const assert = require("node:assert/strict");
-const { parseMarkdown, serializeMarkdown, parseWorkspaceMarkdown, serializeWorkspaceMarkdown } = require(
+const { LIMITS, parseMarkdown, serializeMarkdown, parseWorkspaceMarkdown, serializeWorkspaceMarkdown } = require(
   "../luma-markdown.js",
 );
 const canonical =
@@ -87,3 +87,23 @@ assert.equal(combinedRoundTrip.profiles.find((profile) => profile.id === "person
 assert.equal(combinedRoundTrip.profiles.find((profile) => profile.id === "work").notes, "work only");
 const legacyWorkspace = parseWorkspaceMarkdown(combined.replace("luma-workspace", "northstar-workspace"), "northstar.md");
 assert.equal(legacyWorkspace.profiles.length, 2);
+
+assert.doesNotThrow(() => parseMarkdown(canonical, "within-limits.md"));
+assert.throws(
+  () => parseMarkdown(`## Notes\n\n\`\`\`text\n${"x".repeat(LIMITS.MAX_LINE_LENGTH + 1)}\n\`\`\``, "long-line.md"),
+  /line limit/,
+);
+assert.throws(
+  () => parseMarkdown(`## Tasks\n\n\`\`\`yaml\n- id: one\n  title: "${"x".repeat(LIMITS.MAX_TITLE_LENGTH + 1)}"\n\`\`\``, "long-title.md"),
+  /Task title/,
+);
+const longNotes = Array.from({ length: Math.ceil((LIMITS.MAX_NOTE_LENGTH + 1) / 1000) }, () => "x".repeat(1000)).join("\n    ");
+assert.throws(
+  () => parseMarkdown(`## Tasks\n\n\`\`\`yaml\n- id: one\n  title: okay\n  notes: |\n    ${longNotes}\n\`\`\``, "long-notes.md"),
+  /Task notes/,
+);
+const tooManyTasks = Array.from({ length: LIMITS.MAX_TASKS + 1 }, (_, index) => `- id: task-${index}\n  title: Task ${index}`).join("\n");
+assert.throws(
+  () => parseMarkdown(`## Tasks\n\n\`\`\`yaml\n${tooManyTasks}\n\`\`\``, "too-many.md"),
+  /task limit/,
+);

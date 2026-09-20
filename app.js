@@ -6,6 +6,7 @@
   }
   const { parseWorkspaceMarkdown, serializeWorkspaceMarkdown, normalizeWorkspace } =
     window.LumaMarkdown || window.NorthstarMarkdown;
+  const MAX_IMPORT_BYTES = 5 * 1024 * 1024;
   const root = document.getElementById("root");
   const defaultPreferences = { backupName: "date" };
   const state = {
@@ -379,6 +380,9 @@
   }
   async function importFile(file, handle = null) {
     try {
+      if (!file || file.size > MAX_IMPORT_BYTES) {
+        throw new Error("This file is larger than the 5 MiB import limit. Choose a smaller Markdown file.");
+      }
       const text = await file.text();
       const parsed = parseWorkspaceMarkdown(text, file.name);
       loadProfiles(parsed.profiles, { handle, fileName: file.name || "luma.md", revision: await hash(text) }, state.activeId || "work");
@@ -521,7 +525,7 @@
   }
   function settingsPanel() {
     const name = state.preferences.backupName;
-    return `<div class="lite-settings" ${state.settingsOpen ? "" : "hidden"}><section class="lite-settings-card" role="dialog" aria-modal="true"><div class="lite-settings-header"><h2>Settings</h2><button data-action="close-settings" aria-label="Close settings">${icon("close")}</button></div><p>Luma saves a private recovery copy in this browser. Save to Markdown when you want to update your file.</p><label class="lite-settings-label">Backup filename<select data-setting="backup-name"><option value="date" ${name === "date" ? "selected" : ""}>Current date</option><option value="week" ${name === "week" ? "selected" : ""}>Week number</option></select></label><p class="lite-settings-hint">Downloads use ${esc(backupFilename())}.</p><button class="lite-reset-layout" data-action="reset-layout">Reset current layout</button></section></div>`;
+    return `<div class="lite-settings" ${state.settingsOpen ? "" : "hidden"}><section class="lite-settings-card" role="dialog" aria-modal="true"><div class="lite-settings-header"><h2>Settings</h2><button data-action="close-settings" aria-label="Close settings">${icon("close")}</button></div><p>Luma saves a private recovery copy in this browser. Save to Markdown when you want to update your file.</p><label class="lite-settings-label">Backup filename<select data-setting="backup-name"><option value="date" ${name === "date" ? "selected" : ""}>Current date</option><option value="week" ${name === "week" ? "selected" : ""}>Week number</option></select></label><p class="lite-settings-hint">Downloads use ${esc(backupFilename())}.</p><div class="lite-privacy-notice"><h3>Privacy & local data</h3><p>Your tasks and notes stay in this browser or in the Markdown file you choose. Luma does not send workspace content to a server.</p></div><button class="lite-reset-layout" data-action="reset-layout">Reset current layout</button></section></div>`;
   }
   function tasks(w) {
     const q = state.query.trim().toLowerCase();

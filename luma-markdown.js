@@ -4,6 +4,8 @@
   const ACTIVE_STATUSES = new Set(["inbox", "open", "in-progress", "waiting"]);
   const CLOSED_STATUSES = new Set(["completed", "cancelled", "deleted"]);
   const KNOWN_TASK_FIELDS = new Set(["id", "title", "status", "importance", "urgency", "dueDate", "due", "notes", "createdAt", "updatedAt", "completedAt", "deletedAt", "canvas", "project", "tags", "delegated", "recurrence", "extra"]);
+  // These limits protect the client-only parser from accidental or hostile imports.
+  const LIMITS = Object.freeze({ MAX_TASKS: 1000, MAX_LINE_LENGTH: 20000, MAX_TITLE_LENGTH: 500, MAX_NOTE_LENGTH: 100000 });
   const now = () => new Date().toISOString();
   const newId = () => global.crypto?.randomUUID?.() || `task-${Date.now()}-${Math.random().toString(16).slice(2)}`;
   const quote = (value) => JSON.stringify(String(value ?? ""));
@@ -36,10 +38,24 @@
     });
     return data;
   };
+  function assertSourceLimits(source) {
+    for (const line of String(source || "").replace(/\r/g, "").split("\n")) {
+      if (line.length > LIMITS.MAX_LINE_LENGTH) throw new Error(`Markdown import exceeds the ${LIMITS.MAX_LINE_LENGTH.toLocaleString()}-character line limit.`);
+    }
+  }
+  function assertLength(value, limit, label) {
+    if (String(value || "").length > limit) throw new Error(`${label} exceeds the ${limit.toLocaleString()}-character limit.`);
+  }
   function parseTasks(source) {
     const tasks = [];
     let task = null, nested = null, block = null;
-    const push = () => { if (task && Object.keys(task).length) tasks.push(task); task = null; nested = null; block = null; };
+    const push = () => {
+      if (task && Object.keys(task).length) {
+        if (tasks.length >= LIMITS.MAX_TASKS) throw new Error(`Markdown import exceeds the ${LIMITS.MAX_TASKS.toLocaleString()}-task limit.`);
+        tasks.push(task);
+      }
+      task = null; nested = null; block = null;
+    };
     for (const line of source.replace(/\r/g, "").split("\n")) {
       const item = line.match(/^\s*-\s+id:\s*(.*)$/);
       if (item) { push(); task = { id: unquote(item[1]) }; continue; }
@@ -61,6 +77,10 @@
     push();
     return tasks;
   }
+  function assertWorkspaceTaskCount(profiles) {
+    const count = profiles.reduce((total, profile) => total + (profile.tasks?.length || 0), 0);
+    if (count > LIMITS.MAX_TASKS) throw new Error(`Markdown import exceeds the ${LIMITS.MAX_TASKS.toLocaleString()}-task limit.`);
+  }
   const normalizedStatus = (value) => {
     const status = String(value || "open").toLowerCase().replace(/\s+/g, "-");
     return ACTIVE_STATUSES.has(status) || CLOSED_STATUSES.has(status) ? status : "open";
@@ -71,14 +91,18 @@
     if (!raw.id) warnings.push(`Task ${index + 1} had no id; a new id was created.`);
     if (seen.has(id)) { id = newId(); warnings.push(`Duplicate task id “${raw.id}” was replaced for task ${index + 1}.`); }
     seen.add(id);
+    const title = raw.title == null || raw.title === "" ? `Recovered task ${index + 1}` : String(raw.title);
+    const notes = raw.notes == null ? "" : String(raw.notes);
+    assertLength(title, LIMITS.MAX_TITLE_LENGTH, "Task title");
+    assertLength(notes, LIMITS.MAX_NOTE_LENGTH, "Task notes");
     const dueDate = isIsoDate(raw.dueDate || raw.due) ? String(raw.dueDate || raw.due) : null;
     if ((raw.dueDate || raw.due) && !dueDate) warnings.push(`Task “${raw.title || id}” has an invalid due date.`);
     const canvas = raw.canvas && Number.isFinite(Number(raw.canvas.x)) && Number.isFinite(Number(raw.canvas.y)) ? { x: Number(raw.canvas.x), y: Number(raw.canvas.y) } : null;
     const extra = { ...(raw.extra && typeof raw.extra === "object" ? raw.extra : {}), ...Object.fromEntries(Object.entries(raw).filter(([key]) => !KNOWN_TASK_FIELDS.has(key))) };
     return {
-      id, title: raw.title == null || raw.title === "" ? `Recovered task ${index + 1}` : String(raw.title),
+      id, title,
       status: normalizedStatus(raw.status), importance: raw.importance === "important" ? "important" : "less-important",
-      urgency: urgencyFor(dueDate), dueDate, notes: raw.notes == null ? "" : String(raw.notes),
+      urgency: urgencyFor(dueDate), dueDate, notes,
       project: raw.project == null ? null : String(raw.project), tags: Array.isArray(raw.tags) ? raw.tags.map(String) : raw.tags ? [String(raw.tags)] : [],
       delegated: raw.delegated === true || raw.delegated === "true", recurrence: raw.recurrence == null ? null : String(raw.recurrence),
       createdAt: created, updatedAt: raw.updatedAt || created, completedAt: raw.completedAt || null, deletedAt: raw.deletedAt || null, canvas, extra,
@@ -87,13 +111,16 @@
   const workspaceIdentity = (workspace) => String(workspace.id || workspace.title || "").trim().toLowerCase() === "work" ? "work" : "personal";
   function normalizeWorkspace(workspace, warnings = []) {
     const id = workspaceIdentity(workspace), seen = new Set();
+    const notes = workspace.notes == null ? "" : String(workspace.notes);
+    assertLength(notes, LIMITS.MAX_NOTE_LENGTH, "Workspace notes");
     return {
       id, title: id === "work" ? "Work" : "Personal", tasks: (workspace.tasks || []).map((task, index) => normalizeTask(task, index, warnings, seen)),
-      notes: workspace.notes == null ? "" : String(workspace.notes), fileName: workspace.fileName || `${id}.md`,
+      notes, fileName: workspace.fileName || `${id}.md`,
       handle: workspace.handle || null, revision: workspace.revision || null, dirty: Boolean(workspace.dirty), warnings, frontmatter: workspace.frontmatter || {},
     };
   }
   function parseMarkdown(text, fileName = "luma.md") {
+    assertSourceLimits(text);
     const warnings = [], meta = frontmatter(text);
     const title = meta.title || (/^work(?:\.|$)/i.test(fileName) ? "Work" : "Personal");
     const workspace = normalizeWorkspace({ id: meta.id || title, title, tasks: parseTasks(section("Tasks", text)), notes: section("Notes", text), fileName, frontmatter: meta }, warnings);
@@ -129,6 +156,7 @@
   }
   const subSection = (name, text) => new RegExp(`^###\\s+${name}\\s*\\n\\s*(?:\`\`\`(?:yaml|text)?\\n)?([\\s\\S]*?)(?:\\n\`\`\`|(?=^###\\s)|(?![\\s\\S]))`, "im").exec(text)?.[1]?.replace(/\n$/, "") ?? "";
   function parseWorkspaceMarkdown(text, fileName = "luma.md") {
+    assertSourceLimits(text);
     const meta = frontmatter(text), warnings = [];
     if (!["luma-workspace", "northstar-workspace"].includes(meta.type)) {
       const legacy = parseMarkdown(text, fileName);
@@ -143,6 +171,7 @@
       profiles.push(normalizeWorkspace({ id: title, title, tasks: parseTasks(subSection("Tasks", match[2])), notes: subSection("Notes", match[2]), fileName }, profileWarnings));
       warnings.push(...profileWarnings);
     }
+    assertWorkspaceTaskCount(profiles);
     if (!profiles.length) warnings.push("No Personal or Work profiles were found in this workspace file.");
     return { profiles, warnings, legacy: false };
   }
@@ -154,7 +183,7 @@
     });
     return ["---", "type: luma-workspace", "version: 1", "title: Luma", "---", "", "# Luma", "", ...contents, ""].join("\n");
   }
-  const api = { ACTIVE_STATUSES, CLOSED_STATUSES, isIsoDate, urgencyFor, parseMarkdown, serializeMarkdown, parseWorkspaceMarkdown, serializeWorkspaceMarkdown, normalizeWorkspace, normalizeTask, localDate };
+  const api = { ACTIVE_STATUSES, CLOSED_STATUSES, LIMITS, isIsoDate, urgencyFor, parseMarkdown, serializeMarkdown, parseWorkspaceMarkdown, serializeWorkspaceMarkdown, normalizeWorkspace, normalizeTask, localDate };
   global.LumaMarkdown = api;
   // Compatibility for pages already open before the rename.
   global.NorthstarMarkdown = api;

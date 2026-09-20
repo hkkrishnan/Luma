@@ -14,6 +14,16 @@ test("service worker has an explicit static-shell allowlist", () => {
   assert.match(worker, /const SHELL/);
   assert.match(worker, /SHELL\.includes/);
   assert.doesNotMatch(worker, /cache\.put\(event\.request, copy\)/);
+  assert.match(worker, /Workspace content never enters this cache/);
+});
+
+test("CSP permits only same-origin executable and stylesheet assets", () => {
+  const html = fs.readFileSync("index.html", "utf8");
+  assert.match(html, /script-src 'self'/);
+  assert.match(html, /style-src 'self'/);
+  assert.doesNotMatch(html, /style-src 'self' 'unsafe-inline'/);
+  assert.match(html, /style-src-attr 'unsafe-inline'/);
+  assert.doesNotMatch(html, /<style[\s>]/i);
 });
 
 test("app owns local recovery and external-conflict safeguards", () => {

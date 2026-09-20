@@ -3,7 +3,9 @@
   "private": true,
   "version": "1.0.0",
   "scripts": {
+    "build": "node scripts/build-production.js",
     "test": "node --test test/*.test.js",
+    "test:production": "node --test test/build.test.js",
     "test:e2e": "playwright test",
     "serve": "python3 -m http.server 4173"
   },
