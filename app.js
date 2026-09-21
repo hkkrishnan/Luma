@@ -4,9 +4,10 @@
   if ("serviceWorker" in navigator) {
     window.addEventListener("load", () => navigator.serviceWorker.register("./sw.js").catch(() => {}));
   }
-  const { parseWorkspaceMarkdown, serializeWorkspaceMarkdown, normalizeWorkspace } =
+  const { parseWorkspaceMarkdown, parseTaskImportMarkdown, serializeWorkspaceMarkdown, normalizeWorkspace, normalizeImportHistory } =
     window.LumaMarkdown || window.NorthstarMarkdown;
   const MAX_IMPORT_BYTES = 5 * 1024 * 1024;
+  const IMPORT_HISTORY_LIMIT = 10;
   const root = document.getElementById("root");
   const defaultPreferences = { backupName: "date" };
   const state = {
@@ -20,6 +21,7 @@
     historyOpen: false,
     conflict: null,
     editorNotesExpanded: null,
+    taskImport: null,
     undo: null,
     notice: "",
     captureImportant: false,
@@ -99,7 +101,9 @@
       const bytes = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
       return [...new Uint8Array(bytes)].map((x) => x.toString(16).padStart(2, "0")).join("");
     }
-    return `${text.length}:${text.slice(0, 64)}:${text.slice(-64)}`;
+    let value = 2166136261;
+    for (const char of String(text)) value = Math.imul(value ^ char.charCodeAt(0), 16777619);
+    return `fnv1a:${(value >>> 0).toString(16)}:${String(text).length}`;
   };
   const localDb = (() => {
     const DATABASE = "luma";
@@ -320,6 +324,14 @@
     task.canvas = null;
     return task;
   }
+  function taskFingerprint(task) {
+    const priority = priorityFor(task.dueDate, task.importance).importance;
+    const normalize = (value) => String(value || "").trim().replace(/\s+/g, " ").toLocaleLowerCase();
+    return JSON.stringify([
+      normalize(task.title), normalize(task.notes), task.dueDate || "", priority,
+      String(task.status || "open").toLowerCase(), normalize(task.project),
+    ]);
+  }
   function parseCapture(value) {
     const parsed = parseDueDate(value.trim());
     const title = parsed.token
@@ -373,7 +385,7 @@
     const x = days < 0
       ? OVERDUE_X
       : timelineX(days);
-    return { x, y: t.importance === "important" ? 22 : 66 };
+    return { x, y: priorityFor(t.dueDate, t.importance).importance === "important" ? 22 : 66 };
   }
   function notice(m) {
     state.notice = m;
@@ -394,6 +406,46 @@
     } catch (e) {
       notice(`Could not read Markdown: ${e.message}`);
     }
+  }
+  async function importTasksFile(file) {
+    try {
+      if (!file || file.size > MAX_IMPORT_BYTES) throw new Error("This file is larger than the 5 MiB import limit. Choose a smaller Markdown file.");
+      const text = await file.text();
+      const tasks = parseTaskImportMarkdown(text);
+      const workspace = active();
+      if (!workspace) throw new Error("Open a workspace before importing tasks.");
+      const contentHash = await hash(text);
+      const exactFile = (workspace.importHistory || []).some((entry) => entry.contentHash === contentHash);
+      const existing = new Set(workspace.tasks.map(taskFingerprint));
+      const reviewed = tasks.map((task) => {
+        const normalized = normalizeTaskPriority(task);
+        const taskDuplicate = existing.has(taskFingerprint(normalized));
+        return {
+          ...normalized,
+          duplicate: exactFile ? "file" : taskDuplicate ? "task" : null,
+          selected: !(exactFile || taskDuplicate),
+        };
+      });
+      state.taskImport = {
+        mode: "add", tasks: reviewed,
+        fileName: file.name || "Markdown import",
+        contentHash,
+        exactFile,
+        duplicateCount: reviewed.filter((task) => task.duplicate).length,
+      };
+      state.menuOpen = false;
+      render();
+    } catch (e) { notice(`Could not import tasks: ${e.message}`); }
+  }
+  function recordImportHistory(workspace, review, imported) {
+    const importedIds = new Set(imported.map((task) => task.id));
+    const skippedDuplicates = review.tasks.filter((task) => task.duplicate && !importedIds.has(task.id)).length;
+    const entry = {
+      importedAt: new Date().toISOString(), fileName: review.fileName,
+      mode: review.mode, contentHash: review.contentHash, found: review.tasks.length,
+      added: imported.length, skippedDuplicates,
+    };
+    workspace.importHistory = normalizeImportHistory([entry, ...(workspace.importHistory || [])]).slice(0, IMPORT_HISTORY_LIMIT);
   }
   function picker(direct = false) {
     if (profiles().some((profile) => profile.dirty) &&
@@ -498,7 +550,9 @@
     const undo = state.undo?.workspaceId === w.id;
     return `<div class="lite-menu" ${
       state.menuOpen ? "" : "hidden"
-    } role="menu"><div class="lite-menu-section">Workspace</div><button class="lite-menu-item" data-action="open-workspace">${
+    } role="menu"><div class="lite-menu-section">Workspace</div><button class="lite-menu-item" data-action="import-tasks">${
+      icon("upload")
+    }Import Markdown tasks</button><button class="lite-menu-item" data-action="open-workspace">${
       icon("upload")
     }Open Markdown</button><button class="lite-menu-item" data-action="history">${
       icon("restore")
@@ -526,7 +580,26 @@
   }
   function settingsPanel() {
     const name = state.preferences.backupName;
-    return `<div class="lite-settings" ${state.settingsOpen ? "" : "hidden"}><section class="lite-settings-card" role="dialog" aria-modal="true"><div class="lite-settings-header"><h2>Settings</h2><button data-action="close-settings" aria-label="Close settings">${icon("close")}</button></div><p>Luma saves a private recovery copy in this browser. Save to Markdown when you want to update your file.</p><label class="lite-settings-label">Backup filename<select data-setting="backup-name"><option value="date" ${name === "date" ? "selected" : ""}>Current date</option><option value="week" ${name === "week" ? "selected" : ""}>Week number</option></select></label><p class="lite-settings-hint">Downloads use ${esc(backupFilename())}.</p><div class="lite-privacy-notice"><h3>Privacy & local data</h3><p>Your tasks and notes stay in this browser or in the Markdown file you choose. Luma does not send workspace content to a server.</p></div><button class="lite-reset-layout" data-action="reset-layout">Reset current layout</button></section></div>`;
+    const importCount = active()?.importHistory?.length || 0;
+    return `<div class="lite-settings" ${state.settingsOpen ? "" : "hidden"}><section class="lite-settings-card" role="dialog" aria-modal="true"><div class="lite-settings-header"><h2>Settings</h2><button data-action="close-settings" aria-label="Close settings">${icon("close")}</button></div><p>Luma saves a private recovery copy in this browser. Save to Markdown when you want to update your file.</p><label class="lite-settings-label">Backup filename<select data-setting="backup-name"><option value="date" ${name === "date" ? "selected" : ""}>Current date</option><option value="week" ${name === "week" ? "selected" : ""}>Week number</option></select></label><p class="lite-settings-hint">Downloads use ${esc(backupFilename())}.</p><div class="lite-privacy-notice"><h3>Privacy & local data</h3><p>Your tasks and notes stay in this browser or in the Markdown file you choose. Luma does not send workspace content to a server.</p></div><div class="lite-import-history-setting"><p>${importCount} of ${IMPORT_HISTORY_LIMIT} local import-history entries retained for this workspace. Downloads include the same entries.</p><button class="lite-reset-layout" data-action="clear-import-history" ${importCount ? "" : "disabled"}>Clear import history</button></div><button class="lite-reset-layout" data-action="reset-layout">Reset current layout</button></section></div>`;
+  }
+  function taskImportReview() {
+    const review = state.taskImport;
+    if (!review) return "";
+    const selected = review.tasks.filter((task) => task.selected).length;
+    const importedTasks = review.tasks.map((task, index) => {
+      const urgency = urgencyFor(task.dueDate);
+      const importanceChoices = `<option value="important" ${task.importance === "important" ? "selected" : ""}>Important</option>${
+        urgency === "urgent" ? `<option value="less-important" ${task.importance !== "important" ? "selected" : ""}>Not important</option>` : ""
+      }`;
+      const duplicateLabel = task.duplicate === "file"
+        ? "This exact Markdown file was imported before. Skipped by default."
+        : task.duplicate === "task" ? "An identical task already exists in this workspace. Skipped by default." : "";
+      return `<article class="lite-import-task${task.duplicate ? " is-duplicate" : ""}"><label><input type="checkbox" data-import-selected="${index}" ${task.selected ? "checked" : ""}> Include</label>${duplicateLabel ? `<p class="lite-import-duplicate">${duplicateLabel}</p>` : ""}<input data-import-title="${index}" aria-label="Imported task title" value="${esc(task.title)}"><textarea data-import-notes="${index}" aria-label="Imported task notes">${esc(task.notes || "")}</textarea><div><input data-import-due="${index}" aria-label="Imported task due date" type="date" value="${esc(task.dueDate || "")}"><select data-import-priority="${index}" aria-label="Imported task importance">${importanceChoices}</select></div></article>`;
+    }).join("");
+    const duplicateCount = review.tasks.filter((task) => task.duplicate).length;
+    const summary = `${review.tasks.length} found · ${review.tasks.length - duplicateCount} new · ${duplicateCount} duplicate${duplicateCount === 1 ? "" : "s"} skipped`;
+    return `<div class="lite-history"><section class="lite-history-card lite-import-card" role="dialog" aria-modal="true"><div class="lite-settings-header"><h2>Review Markdown tasks</h2><button data-action="cancel-task-import" aria-label="Close import review">${icon("close")}</button></div><p>${summary}. Edit or select duplicates to import them anyway.</p>${review.exactFile ? `<p class="lite-import-warning">This exact file was previously imported into ${esc(active()?.title || "this workspace")}. All tasks start unchecked.</p>` : ""}<label class="lite-settings-label">Import mode<select data-import-mode><option value="add" ${review.mode === "add" ? "selected" : ""}>Add to workspace</option><option value="replace" ${review.mode === "replace" ? "selected" : ""}>Replace workspace — removes all current tasks</option></select></label>${review.mode === "replace" ? `<p class="lite-import-warning">Replace workspace will permanently remove the current task list unless you use Undo immediately afterward.</p>` : ""}<div class="lite-import-list">${importedTasks}</div><div class="lite-editor-actions"><button class="lite-editor-delete" data-action="cancel-task-import">Cancel</button><button class="lite-editor-save" data-action="confirm-task-import">${review.mode === "replace" ? "Replace with selected tasks" : "Add selected tasks"}</button></div></section></div>`;
   }
   function tasks(w) {
     const q = state.query.trim().toLowerCase();
@@ -538,7 +611,7 @@
       (!state.search || `${t.title} ${t.notes} ${(t.tags || []).join(" ")} ${t.project || ""}`.toLowerCase().includes(q))
     ).map((t, i) => ({
       t, i, saved: position(t, i, w),
-      band: t.importance === "important" ? "important" : "less-important",
+      band: priorityFor(t.dueDate, t.importance).importance === "important" ? "important" : "less-important",
     }));
     const occupied = { important: [], "less-important": [] };
     ["important", "less-important"].forEach((band) => cards
@@ -674,7 +747,7 @@
         tasks(w)
       }</div>${panel(w)}</section><p class="lite-toast" role="status">${
         esc(state.notice)
-      }</p>${history(w)}<div class="lite-conflict" ${state.conflict ? "" : "hidden"}><section class="lite-settings-card" role="dialog" aria-modal="true"><div class="lite-settings-header"><h2>File changed outside Luma</h2></div><p>Reload the selected file, or download your current in-memory changes. Nothing has been overwritten.</p><div class="lite-editor-actions"><button class="lite-editor-delete" data-action="conflict-download">Download current changes</button><button class="lite-editor-save" data-action="conflict-reload">Reload file</button></div></section></div>${settingsPanel()}</main>`;
+      }</p>${history(w)}${taskImportReview()}<div class="lite-conflict" ${state.conflict ? "" : "hidden"}><section class="lite-settings-card" role="dialog" aria-modal="true"><div class="lite-settings-header"><h2>File changed outside Luma</h2></div><p>Reload the selected file, or download your current in-memory changes. Nothing has been overwritten.</p><div class="lite-editor-actions"><button class="lite-editor-delete" data-action="conflict-download">Download current changes</button><button class="lite-editor-save" data-action="conflict-reload">Reload file</button></div></section></div>${settingsPanel()}</main>`;
     const notImportantLabel = root.querySelector(".axis-not-important");
     if (notImportantLabel) notImportantLabel.innerHTML = "<span>Not</span><span>Important</span>";
     bind();
@@ -867,6 +940,35 @@
         const a = b.dataset.action;
         if (a === "direct-open") picker(true);
         else if (a === "reconnect") void reconnect();
+        else if (a === "import-tasks") {
+          const input = document.getElementById("markdown-task-import");
+          input.value = "";
+          input.click();
+        } else if (a === "cancel-task-import") {
+          state.taskImport = null;
+          render();
+        } else if (a === "confirm-task-import") {
+          const review = state.taskImport, workspace = active();
+          if (!review || !workspace) return;
+          const imported = review.tasks.map((task, index) => normalizeTaskPriority({
+            ...task,
+            selected: root.querySelector(`[data-import-selected="${index}"]`)?.checked,
+            title: root.querySelector(`[data-import-title="${index}"]`)?.value.trim() || task.title,
+            notes: root.querySelector(`[data-import-notes="${index}"]`)?.value || "",
+            dueDate: root.querySelector(`[data-import-due="${index}"]`)?.value || null,
+            importance: root.querySelector(`[data-import-priority="${index}"]`)?.value || "less-important",
+          })).filter((task) => task.selected);
+          if (!imported.length) return notice("Select at least one task to import.");
+          const beforeTasks = workspace.tasks.map((task) => ({ ...task }));
+          const beforeImportHistory = [...(workspace.importHistory || [])];
+          workspace.tasks = review.mode === "replace" ? imported : [...workspace.tasks, ...imported];
+          recordImportHistory(workspace, review, imported);
+          dirty(workspace);
+          state.undo = { workspaceId: workspace.id, kind: review.mode === "replace" ? "workspace replacement" : "task import", beforeTasks, beforeImportHistory };
+          state.taskImport = null;
+          state.notice = `${review.mode === "replace" ? "Replaced" : "Added"} ${imported.length} imported task${imported.length === 1 ? "" : "s"}.`;
+          render();
+        }
         else if (a === "new-workspace") {
           const workspace = blank("work");
           workspace.dirty = true;
@@ -894,6 +996,13 @@
         } else if (a === "close-settings") {
           state.settingsOpen = false;
           render();
+        } else if (a === "clear-import-history") {
+          const workspace = active();
+          if (!workspace) return;
+          workspace.importHistory = [];
+          dirty(workspace);
+          state.notice = "Cleared local import history for this workspace.";
+          render();
         } else if (a === "close-history") {
           state.historyOpen = false;
           render();
@@ -914,6 +1023,15 @@
           render();
           if (state.editorNotesExpanded) root.querySelector("#task-notes")?.focus();
         } else if (a === "undo") {
+          if (state.undo.kind === "workspace replacement" || state.undo.kind === "task import") {
+            active().tasks = state.undo.beforeTasks;
+            active().importHistory = state.undo.beforeImportHistory || [];
+            dirty(active());
+            state.undo = null;
+            state.menuOpen = false;
+            render();
+            return;
+          }
           const t = active().tasks.find((x) => x.id === state.undo.taskId);
           if (t) {
             update(t, { status: "open", completedAt: null, deletedAt: null });
@@ -954,6 +1072,10 @@
       queueLocalSave();
       render();
     });
+    root.querySelector("[data-import-mode]")?.addEventListener("change", (e) => {
+      state.taskImport.mode = e.target.value === "replace" ? "replace" : "add";
+      render();
+    });
     root.querySelector(".lite-stage")?.addEventListener("click", (e) => {
       if (e.target.classList.contains("lite-stage")) {
         state.selectedId = null;
@@ -964,6 +1086,10 @@
   document.getElementById("markdown-file").addEventListener("change", (e) => {
     const f = e.target.files?.[0];
     if (f) importFile(f);
+  });
+  document.getElementById("markdown-task-import").addEventListener("change", (e) => {
+    const file = e.target.files?.[0];
+    if (file) void importTasksFile(file);
   });
   document.addEventListener("click", (e) => {
     if (state.menuOpen && !e.target.closest(".menu-anchor")) {

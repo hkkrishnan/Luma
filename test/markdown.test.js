@@ -1,5 +1,5 @@
 const assert = require("node:assert/strict");
-const { LIMITS, parseMarkdown, serializeMarkdown, parseWorkspaceMarkdown, serializeWorkspaceMarkdown } = require(
+const { LIMITS, parseMarkdown, parseTaskImportMarkdown, serializeMarkdown, parseWorkspaceMarkdown, serializeWorkspaceMarkdown } = require(
   "../luma-markdown.js",
 );
 const canonical =
@@ -85,6 +85,18 @@ const combinedRoundTrip = parseWorkspaceMarkdown(combined, "luma.md");
 assert.equal(combinedRoundTrip.profiles.length, 2);
 assert.equal(combinedRoundTrip.profiles.find((profile) => profile.id === "personal").tasks[0].title, 'Call: "Maya" #1');
 assert.equal(combinedRoundTrip.profiles.find((profile) => profile.id === "work").notes, "work only");
+const importHistory = Array.from({ length: 11 }, (_, index) => ({
+  importedAt: `2026-09-${String(index + 1).padStart(2, "0")}T10:00:00.000Z`,
+  fileName: `intake-${index + 1}.md`, mode: "add", contentHash: `sha256-${index + 1}`,
+  found: 3, added: 2, skippedDuplicates: 1,
+}));
+const historyMarkdown = serializeWorkspaceMarkdown([{ ...personal, importHistory }]);
+assert.match(historyMarkdown, /### Import history/);
+assert.match(historyMarkdown, /intake-11\.md/);
+assert.doesNotMatch(historyMarkdown, /intake-1\.md/);
+const historyRoundTrip = parseWorkspaceMarkdown(historyMarkdown, "luma.md");
+assert.equal(historyRoundTrip.profiles[0].importHistory.length, 10);
+assert.equal(historyRoundTrip.profiles[0].importHistory[0].fileName, "intake-11.md");
 const legacyWorkspace = parseWorkspaceMarkdown(combined.replace("luma-workspace", "northstar-workspace"), "northstar.md");
 assert.equal(legacyWorkspace.profiles.length, 2);
 
@@ -107,3 +119,31 @@ assert.throws(
   () => parseMarkdown(`## Tasks\n\n\`\`\`yaml\n${tooManyTasks}\n\`\`\``, "too-many.md"),
   /task limit/,
 );
+
+const intake = parseTaskImportMarkdown(`# Luma Weekly Intake
+
+## Action Items
+- [ ] Send proposal to Maya
+  - description: Revised timeline and legal feedback.
+  - project: People Ops
+  - priority: high
+  - due: 2026-09-23
+  - source: Teams discussion
+- [x] Archive the decision
+  - due: unknown
+  - priority: low
+`);
+assert.equal(intake.length, 2);
+assert.equal(intake[0].title, "Send proposal to Maya");
+assert.equal(intake[0].notes, "Revised timeline and legal feedback.\nSource: Teams discussion");
+assert.equal(intake[0].dueDate, "2026-09-23");
+assert.equal(intake[0].importance, "important");
+assert.equal(intake[0].project, "People Ops");
+assert.equal(intake[1].status, "completed");
+assert.equal(intake[1].dueDate, null);
+assert.equal(intake[1].importance, "important", "non-urgent imports use Luma's Important quadrant");
+const plainChecklist = parseTaskImportMarkdown(`Intro prose\n- [ ] Plain task\n  Follow up after the meeting.\n  - second detail\n- [x] Done task\n  - due: invalid`);
+assert.equal(plainChecklist[0].notes, "Follow up after the meeting.\nsecond detail");
+assert.equal(plainChecklist[1].status, "completed");
+assert.equal(plainChecklist[1].dueDate, null);
+assert.throws(() => parseTaskImportMarkdown("# Only prose\nNo tasks here"), /No Markdown checklist tasks/);
