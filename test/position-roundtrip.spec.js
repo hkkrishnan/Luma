@@ -60,7 +60,7 @@ test("one Markdown workspace preserves profiles and aligns same-date tasks", asy
   });
   await expect(page.getByText("First important task")).toBeVisible();
   await page.getByRole("button", { name: "Open workspace menu" }).click();
-  await expect(page.getByRole("button", { name: "Open Markdown" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Open" })).toBeVisible();
   const before = await positions(page);
   expect(before.find((item) => item.id === "first").x).toBe(before.find((item) => item.id === "second").x);
   expect(before.find((item) => item.id === "first").y).not.toBe(before.find((item) => item.id === "second").y);

@@ -552,9 +552,9 @@
       state.menuOpen ? "" : "hidden"
     } role="menu"><div class="lite-menu-section">Workspace</div><button class="lite-menu-item" data-action="import-tasks">${
       icon("upload")
-    }Import Markdown tasks</button><button class="lite-menu-item" data-action="open-workspace">${
+    }Import</button><button class="lite-menu-item" data-action="open-workspace">${
       icon("upload")
-    }Open Markdown</button><button class="lite-menu-item" data-action="history">${
+    }Open</button><button class="lite-menu-item" data-action="history">${
       icon("restore")
     }History</button>${
       undo
@@ -686,9 +686,9 @@
       }</div></section>`;
     }
     const notesExpanded = state.editorNotesExpanded ?? Boolean(t.notes);
-    return `<section class="lite-notes is-editing"><div class="lite-editor-grid"><label class="lite-editor-title-label"><span>Task editor</span><input id="task-title" class="lite-editor-title" aria-label="Task title" value="${
+    return `<section class="lite-notes is-editing"><div class="lite-editor-grid"><label class="lite-editor-title-label"><span>Task editor</span><textarea id="task-title" class="lite-editor-title" aria-label="Task title" rows="2">${
       esc(t.title)
-    }"></label><label class="lite-editor-label">Due date<input id="task-due" class="lite-editor-field" type="date" value="${
+    }</textarea></label><label class="lite-editor-label">Due date<input id="task-due" class="lite-editor-field" type="date" value="${
       esc(t.dueDate || "")
     }"></label><label class="lite-editor-label">Importance<select id="task-importance" class="lite-editor-field"><option value="important" ${
       t.importance === "important" ? "selected" : ""

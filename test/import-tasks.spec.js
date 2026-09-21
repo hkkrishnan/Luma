@@ -7,7 +7,7 @@ test("reviews Markdown tasks before adding or replacing a workspace", async ({ p
   await page.keyboard.type("Existing task");
   await page.keyboard.press("Enter");
   await page.getByRole("button", { name: "Open workspace menu" }).click();
-  await page.getByRole("button", { name: "Import Markdown tasks" }).click();
+  await page.getByRole("button", { name: "Import", exact: true }).click();
   await page.locator("#markdown-task-import").setInputFiles({
     name: "intake.md", mimeType: "text/markdown", buffer: Buffer.from("- [ ] Imported task\n  - description: Review this\n  - due: 2026-10-01\n  - priority: high"),
   });
@@ -22,7 +22,7 @@ test("uses Luma importance rules and keeps non-urgent imports above workspace no
   await page.goto("/");
   await page.getByRole("button", { name: "Start a new Markdown file" }).click();
   await page.getByRole("button", { name: "Open workspace menu" }).click();
-  await page.getByRole("button", { name: "Import Markdown tasks" }).click();
+  await page.getByRole("button", { name: "Import", exact: true }).click();
   await page.locator("#markdown-task-import").setInputFiles({
     name: "later.md", mimeType: "text/markdown", buffer: Buffer.from("- [ ] Unscheduled imported task\n  - priority: low\n  - due: unknown"),
   });
@@ -44,13 +44,13 @@ test("skips an exact file re-import by default and writes bounded audit history 
   await page.goto("/");
   await page.getByRole("button", { name: "Start a new Markdown file" }).click();
   await page.getByRole("button", { name: "Open workspace menu" }).click();
-  await page.getByRole("button", { name: "Import Markdown tasks" }).click();
+  await page.getByRole("button", { name: "Import", exact: true }).click();
   await page.locator("#markdown-task-import").setInputFiles({
     name: "same-file.md", mimeType: "text/markdown", buffer: Buffer.from(markdown),
   });
   await page.getByRole("button", { name: "Add selected tasks" }).click();
   await page.getByRole("button", { name: "Open workspace menu" }).click();
-  await page.getByRole("button", { name: "Import Markdown tasks" }).click();
+  await page.getByRole("button", { name: "Import", exact: true }).click();
   await page.locator("#markdown-task-import").setInputFiles({
     name: "same-file.md", mimeType: "text/markdown", buffer: Buffer.from(markdown),
   });
@@ -73,16 +73,32 @@ test("flags an existing identical task from a changed Markdown file", async ({ p
   await page.goto("/");
   await page.getByRole("button", { name: "Start a new Markdown file" }).click();
   await page.getByRole("button", { name: "Open workspace menu" }).click();
-  await page.getByRole("button", { name: "Import Markdown tasks" }).click();
+  await page.getByRole("button", { name: "Import", exact: true }).click();
   await page.locator("#markdown-task-import").setInputFiles({
     name: "first.md", mimeType: "text/markdown", buffer: Buffer.from("- [ ] Same task\n  - due: unknown"),
   });
   await page.getByRole("button", { name: "Add selected tasks" }).click();
   await page.getByRole("button", { name: "Open workspace menu" }).click();
-  await page.getByRole("button", { name: "Import Markdown tasks" }).click();
+  await page.getByRole("button", { name: "Import", exact: true }).click();
   await page.locator("#markdown-task-import").setInputFiles({
     name: "changed-wrapper.md", mimeType: "text/markdown", buffer: Buffer.from("# Different file wrapper\n\n- [ ] Same task\n  - due: unknown"),
   });
   await expect(page.getByText("An identical task already exists in this workspace. Skipped by default.")).toBeVisible();
   await expect(page.locator("[data-import-selected='0']")).not.toBeChecked();
+});
+
+test("wraps a long task title in a compact two-line editor field", async ({ page }) => {
+  const title = "Prepare a detailed cross-functional launch readiness review with every stakeholder on the launch team";
+  await page.goto("/");
+  await page.getByRole("button", { name: "Start a new Markdown file" }).click();
+  await page.keyboard.press("/");
+  await page.keyboard.type(title);
+  await page.keyboard.press("Enter");
+  await page.locator(".lite-task-label").click();
+  const editor = page.getByLabel("Task title");
+  await expect(editor).toHaveValue(title);
+  await expect(editor).toHaveAttribute("rows", "2");
+  await expect(editor).toHaveCSS("overflow-y", "hidden");
+  await editor.focus();
+  await expect(editor).toHaveCSS("outline-style", "none");
 });
